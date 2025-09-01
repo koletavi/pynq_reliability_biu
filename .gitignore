@@ -1,0 +1,47 @@
+# Ignore PYNQ data directory
+pynq_data/
+
+# Ignore zip files
+*.zip
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.egg-info/
+*.egg
+*.log
+*.sqlite3
+.env
+.venv/
+venv/
+build/
+dist/
+
+# Jupyter
+.ipynb_checkpoints/
+
+# TCL / Vivado
+*.jou
+*.log
+*.str
+*.dcp
+*.runs/
+*.sim/
+*.xpr
+*.cache/
+*.hw/
+*.ip_user_files/
+*.xdc
+*.ltx
+
+# Verilog simulation artifacts
+*.vcd
+*.wdb
+*.vvp
+*.f
+
+# OS-specific
+.DS_Store
+Thumbs.db
