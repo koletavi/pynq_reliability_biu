@@ -8,7 +8,7 @@ plt.style.use('fivethirtyeight')
 def animate(i):
     try:
         # Read the CSV file
-        data = pd.read_csv(r"C:\pynq\pynq_data\live_temperature_data.csv")
+        data = pd.read_csv(r"C:\pynq\pynq_data\temperature_data\live_temperature_data.csv")
         # Extract x and y data
         x = data['time']
         y = data['Temperature']
