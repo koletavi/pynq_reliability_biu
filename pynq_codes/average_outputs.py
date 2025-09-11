@@ -34,8 +34,12 @@ import csv
 import re
 from collections import defaultdict
 
-# Directory containing the output CSV files
+# Base directory for all data
 LOCAL_OUTPUT_DIR = r"C:\pynq\pynq_data"
+# Directory containing the input CSV files from PYNQ runs
+LOCAL_PYNQ_DATA_DIR = os.path.join(LOCAL_OUTPUT_DIR, "pynq_run_data")
+# Directory for averaged output files
+AVG_OUTPUT_DIR = os.path.join(LOCAL_OUTPUT_DIR, "averages")
 
 
 # Regex to match files like output_data_not_0C_1_2_3_time_4.csv
@@ -107,9 +111,8 @@ def write_avg_csv_for_temp(temp, files, directory):
         gate_files = [h[2] for h in header_info]
     
         # Write output
-        avg_dir = os.path.join(directory, "avg")
-        os.makedirs(avg_dir, exist_ok=True)
-        avg_file = os.path.join(avg_dir, f"avg_output_data_{temp}_{gate_type}.csv")
+        os.makedirs(AVG_OUTPUT_DIR, exist_ok=True)
+        avg_file = os.path.join(AVG_OUTPUT_DIR, f"avg_output_data_{temp}_{gate_type}.csv")
         
         with open(avg_file, 'w', newline='') as f:
             writer = csv.writer(f)
@@ -147,9 +150,9 @@ def write_avg_csv_for_temp(temp, files, directory):
 
 
 def main():
-    groups = group_files_by_temp(LOCAL_OUTPUT_DIR)
+    groups = group_files_by_temp(LOCAL_PYNQ_DATA_DIR)
     for temp, files in groups.items():
-        write_avg_csv_for_temp(temp, files, LOCAL_OUTPUT_DIR)
+        write_avg_csv_for_temp(temp, files, LOCAL_PYNQ_DATA_DIR)
 
 if __name__ == "__main__":
     main()

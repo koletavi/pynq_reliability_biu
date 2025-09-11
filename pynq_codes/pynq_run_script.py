@@ -24,7 +24,8 @@ NOTEBOOKS = [
 ]
 REMOTE_NOTEBOOK_DIR = "/home/xilinx/jupyter_notebooks/rofc/"
 LOCAL_OUTPUT_DIR = r"C:\pynq\pynq_data"
-LOG_DIR = r"C:\pynq\pynq_data\logs"
+LOG_DIR = os.path.join(LOCAL_OUTPUT_DIR, "logs")
+LOCAL_PYNQ_DATA_DIR = os.path.join(LOCAL_OUTPUT_DIR, "pynq_run_data")
 POLL_TIMEOUT = 5*60  # Maximum seconds to wait for output file
 POLL_INTERVAL = 1  # Seconds between file existence checks
 
@@ -67,7 +68,7 @@ def execute_notebook_and_copy(notebook_name, output_csv_name):
 
         notebook_path = REMOTE_NOTEBOOK_DIR + notebook_name 
         output_file = REMOTE_NOTEBOOK_DIR + output_csv_name
-        local_output_base = os.path.join(LOCAL_OUTPUT_DIR, output_csv_name)
+        local_output_base = os.path.join(LOCAL_PYNQ_DATA_DIR, output_csv_name)
         local_output_path = get_unique_output_path(local_output_base, ".csv")
 
         # Get initial modification time of the output file (if it exists)
@@ -116,7 +117,7 @@ def execute_notebook_and_copy(notebook_name, output_csv_name):
         # Copy the output file using SCP with unique name
         log(f"Copying output file to {local_output_path}...")
         scp = ssh.open_sftp()
-        os.makedirs(LOCAL_OUTPUT_DIR, exist_ok=True)
+        os.makedirs(LOCAL_PYNQ_DATA_DIR, exist_ok=True)
         scp.get(output_file, local_output_path)
         log(f"Output file copied to {local_output_path}")
 
@@ -139,7 +140,7 @@ def execute_notebook_and_copy(notebook_name, output_csv_name):
 
 def main():
     global log_file
-    os.makedirs(LOCAL_OUTPUT_DIR, exist_ok=True)
+    os.makedirs(LOCAL_PYNQ_DATA_DIR, exist_ok=True)
     log_path = get_unique_log_path()
     log_file = open(log_path, "w", encoding="utf-8")
     try:

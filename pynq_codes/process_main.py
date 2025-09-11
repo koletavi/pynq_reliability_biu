@@ -23,6 +23,7 @@ SLAVE_ID = 1
 
 # Local output directory
 LOCAL_OUTPUT_DIR = r"C:\pynq\pynq_data" # FIXME if system set in another folder
+LOCAL_TEMP_DIR = os.path.join(LOCAL_OUTPUT_DIR, "temperature_data")  # Path to the temperature data CSV file
 PYNQ_RUN_SCRIPT =  r"C:\pynq\pynq_codes\pynq_run_script.py"  # Path to the script that runs on the PYNQ-Z2 FIXME if set in another folder
 
 # List of registers to read (from d_reg_minimal_file.xlsx)
@@ -87,9 +88,9 @@ REGISTERS = [
 # controller program 1 setup
 lc = 0 # LC: Loop Control - 0=RPT 1=HOLD 2=P1 3=P2
 ssp = 24 # SSP: starting setpoint in degrees Celsius !- must be lesser then measured temperatures - ! 
-temperature_list = [ 25 , 120 , 105 , 120 ]
+temperature_list = [ 120 , 121 , 132 , 133 ]
 temperature_enable = [ 1 , 0 , 0 , 0 ] # Enable or disable each temperature in the list 1 = enabled, 0 = disabled
-time_list = [ 1 , 5 ] # rise time and hold time in minutes
+time_list = [ 10 , 60*35 ] # rise time and hold time in minutes
 
 # stability parameters
 stability_standard_deviation = 5  # Standard deviation threshold for stability
@@ -293,8 +294,8 @@ def main():
         print("=== Initialization and Setup ===\n")
 
         # Ensure the local output directory exists
-        temperature_file = os.path.join(LOCAL_OUTPUT_DIR, "temperature_data.csv")
-        live_temperature_file = os.path.join(LOCAL_OUTPUT_DIR, "live_temperature_data.csv")
+        temperature_file = os.path.join(LOCAL_TEMP_DIR, "temperature_data.csv")
+        live_temperature_file = os.path.join(LOCAL_TEMP_DIR, "live_temperature_data.csv")
         # Create csv files
         create_csv(temperature_file, "time", "Temperature")  # Create initial CSV
         create_csv(live_temperature_file, "time", "Temperature")  # Create live temperature CSV
