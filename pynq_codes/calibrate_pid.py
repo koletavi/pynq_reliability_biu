@@ -71,8 +71,19 @@ REGISTERS = [
 
 #FIXME: Change these values as needed
 
-# process parameters
+arw = 1000
+fuzzy = 1
+cmod = 1
 
+p1 = 75 
+i1 = 160 
+d1 = 130
+rp1 = 70
+rdv = 0
+
+# process parameters
+"""""
+softer drive for less steady state error - NOT TESTED
 arw = 300
 fuzzy = 1
 cmod = 1
@@ -83,7 +94,7 @@ d1 = 60
 rp1 = 80
 rdv = 0
 
-"""""
+
 aggresive overshoot supression
 arw = 300
 fuzzy = 1

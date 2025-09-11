@@ -86,16 +86,16 @@ REGISTERS = [
 
 # controller program 1 setup
 lc = 0 # LC: Loop Control - 0=RPT 1=HOLD 2=P1 3=P2
-ssp = 30 # SSP: starting setpoint in degrees Celsius
-temperature_list = [ 80 , 90 , 105 , 120 ]
+ssp = 24 # SSP: starting setpoint in degrees Celsius !- must be lesser then measured temperatures - ! 
+temperature_list = [ 25 , 120 , 105 , 120 ]
 temperature_enable = [ 1 , 0 , 0 , 0 ] # Enable or disable each temperature in the list 1 = enabled, 0 = disabled
-time_list = [ 5 , 30 ] # rise time and hold time in minutes
+time_list = [ 1 , 5 ] # rise time and hold time in minutes
 
 # stability parameters
 stability_standard_deviation = 5  # Standard deviation threshold for stability
-stability_threshold = 60*2 # time in seconds that the process must be stable before triggering PYNQ-Z2
+stability_threshold = 60*2 # time in 60*minutes that the process must be stable before triggering PYNQ-Z2
 
-pynq_wait_threshold = 60*10  # Minimum wait time in 60*minutes before triggering PYNQ-Z2 again
+pynq_wait_threshold = 60*30  # Minimum wait time in 60*minutes before triggering PYNQ-Z2 again
 #--------------------------------#
 ##### Oven Control Functions #####
 #--------------------------------#
