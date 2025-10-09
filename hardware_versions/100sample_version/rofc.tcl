@@ -358,7 +358,6 @@ proc create_root_design { parentCell } {
     CONFIG.PCW_I2C_RESET_POLARITY {Active Low} \
     CONFIG.PCW_IMPORT_BOARD_PRESET {None} \
     CONFIG.PCW_INCLUDE_ACP_TRANS_CHECK {0} \
-    CONFIG.PCW_IRQ_F2P_MODE {DIRECT} \
     CONFIG.PCW_MIO_0_IOTYPE {LVCMOS 3.3V} \
     CONFIG.PCW_MIO_0_PULLUP {enabled} \
     CONFIG.PCW_MIO_0_SLEW {slow} \
@@ -571,7 +570,7 @@ proc create_root_design { parentCell } {
     CONFIG.PCW_PACKAGE_NAME {clg400} \
     CONFIG.PCW_PCAP_PERIPHERAL_CLKSRC {IO PLL} \
     CONFIG.PCW_PCAP_PERIPHERAL_FREQMHZ {200} \
-    CONFIG.PCW_PERIPHERAL_BOARD_PRESET {part0} \
+    CONFIG.PCW_PERIPHERAL_BOARD_PRESET {None} \
     CONFIG.PCW_PLL_BYPASSMODE_ENABLE {0} \
     CONFIG.PCW_PRESET_BANK0_VOLTAGE {LVCMOS 3.3V} \
     CONFIG.PCW_PRESET_BANK1_VOLTAGE {LVCMOS 1.8V} \
@@ -615,9 +614,6 @@ proc create_root_design { parentCell } {
     CONFIG.PCW_SPI_PERIPHERAL_VALID {0} \
     CONFIG.PCW_S_AXI_HP0_DATA_WIDTH {64} \
     CONFIG.PCW_S_AXI_HP0_ID_WIDTH {6} \
-    CONFIG.PCW_S_AXI_HP1_DATA_WIDTH {64} \
-    CONFIG.PCW_S_AXI_HP2_DATA_WIDTH {64} \
-    CONFIG.PCW_S_AXI_HP3_DATA_WIDTH {64} \
     CONFIG.PCW_TPIU_PERIPHERAL_CLKSRC {External} \
     CONFIG.PCW_TTC0_CLK0_PERIPHERAL_CLKSRC {CPU_1X} \
     CONFIG.PCW_TTC0_CLK0_PERIPHERAL_DIVISOR0 {1} \
@@ -776,16 +772,16 @@ proc create_root_design { parentCell } {
   connect_bd_intf_net -intf_net processing_system7_M_AXI_GP0 [get_bd_intf_pins processing_system7/M_AXI_GP0] [get_bd_intf_pins ps7_axi_periph/S00_AXI]
   connect_bd_intf_net -intf_net ps7_axi_periph_M00_AXI [get_bd_intf_pins ps7_axi_periph/M00_AXI] [get_bd_intf_pins axi_dma/S_AXI_LITE]
   connect_bd_intf_net -intf_net ps7_axi_periph_M01_AXI [get_bd_intf_pins ps7_axi_periph/M01_AXI] [get_bd_intf_pins rofreqIP/s00_axi]
-  connect_bd_intf_net -intf_net rofreqIP_m00_axis [get_bd_intf_pins axi_dma/S_AXIS_S2MM] [get_bd_intf_pins rofreqIP/m00_axis]
+  connect_bd_intf_net -intf_net rofreqIP_m00_axis [get_bd_intf_pins rofreqIP/m00_axis] [get_bd_intf_pins axi_dma/S_AXIS_S2MM]
 
   # Create port connections
-  connect_bd_net -net processing_system7_FCLK_CLK0 [get_bd_pins processing_system7/FCLK_CLK0] [get_bd_pins processing_system7/M_AXI_GP0_ACLK] [get_bd_pins ps7_axi_periph/S00_ACLK] [get_bd_pins rst_ps7_100M/slowest_sync_clk] [get_bd_pins axi_dma/s_axi_lite_aclk] [get_bd_pins ps7_axi_periph/M00_ACLK] [get_bd_pins ps7_axi_periph/ACLK] [get_bd_pins ps7_axi_periph/M01_ACLK] [get_bd_pins axi_dma/m_axi_s2mm_aclk] [get_bd_pins axi_mem_intercon/S00_ACLK] [get_bd_pins processing_system7/S_AXI_HP0_ACLK] [get_bd_pins axi_mem_intercon/M00_ACLK] [get_bd_pins axi_mem_intercon/ACLK] [get_bd_pins rofreqIP/s00_axi_aclk] [get_bd_pins rofreqIP/m00_axis_aclk]
+  connect_bd_net -net processing_system7_FCLK_CLK0 [get_bd_pins processing_system7/FCLK_CLK0] [get_bd_pins processing_system7/M_AXI_GP0_ACLK] [get_bd_pins ps7_axi_periph/S00_ACLK] [get_bd_pins rst_ps7_100M/slowest_sync_clk] [get_bd_pins axi_dma/s_axi_lite_aclk] [get_bd_pins ps7_axi_periph/M00_ACLK] [get_bd_pins ps7_axi_periph/ACLK] [get_bd_pins axi_dma/m_axi_s2mm_aclk] [get_bd_pins ps7_axi_periph/M01_ACLK] [get_bd_pins axi_mem_intercon/S00_ACLK] [get_bd_pins processing_system7/S_AXI_HP0_ACLK] [get_bd_pins axi_mem_intercon/M00_ACLK] [get_bd_pins axi_mem_intercon/ACLK] [get_bd_pins rofreqIP/m00_axis_aclk] [get_bd_pins rofreqIP/s00_axi_aclk]
   connect_bd_net -net processing_system7_FCLK_RESET0_N [get_bd_pins processing_system7/FCLK_RESET0_N] [get_bd_pins rst_ps7_100M/ext_reset_in]
   connect_bd_net -net rofreqIP_RO_GPIO_OUT [get_bd_pins rofreqIP/RO_GPIO_OUT] [get_bd_ports RO_GPIO_OUT]
-  connect_bd_net -net rst_ps7_100M_peripheral_aresetn [get_bd_pins rst_ps7_100M/peripheral_aresetn] [get_bd_pins ps7_axi_periph/S00_ARESETN] [get_bd_pins axi_dma/axi_resetn] [get_bd_pins ps7_axi_periph/M00_ARESETN] [get_bd_pins ps7_axi_periph/ARESETN] [get_bd_pins ps7_axi_periph/M01_ARESETN] [get_bd_pins axi_mem_intercon/S00_ARESETN] [get_bd_pins axi_mem_intercon/M00_ARESETN] [get_bd_pins axi_mem_intercon/ARESETN] [get_bd_pins rofreqIP/s00_axi_aresetn] [get_bd_pins rofreqIP/m00_axis_aresetn]
+  connect_bd_net -net rst_ps7_100M_peripheral_aresetn [get_bd_pins rst_ps7_100M/peripheral_aresetn] [get_bd_pins ps7_axi_periph/S00_ARESETN] [get_bd_pins axi_dma/axi_resetn] [get_bd_pins ps7_axi_periph/M00_ARESETN] [get_bd_pins ps7_axi_periph/ARESETN] [get_bd_pins ps7_axi_periph/M01_ARESETN] [get_bd_pins axi_mem_intercon/S00_ARESETN] [get_bd_pins axi_mem_intercon/M00_ARESETN] [get_bd_pins axi_mem_intercon/ARESETN] [get_bd_pins rofreqIP/m00_axis_aresetn] [get_bd_pins rofreqIP/s00_axi_aresetn]
 
   # Create address segments
-  assign_bd_address -offset 0x40400000 -range 0x00010000 -with_name SEG_axi_dma_0_Reg -target_address_space [get_bd_addr_spaces processing_system7/Data] [get_bd_addr_segs axi_dma/S_AXI_LITE/Reg] -force
+  assign_bd_address -offset 0x40400000 -range 0x00010000 -target_address_space [get_bd_addr_spaces processing_system7/Data] [get_bd_addr_segs axi_dma/S_AXI_LITE/Reg] -force
   assign_bd_address -offset 0x40000000 -range 0x00001000 -target_address_space [get_bd_addr_spaces processing_system7/Data] [get_bd_addr_segs rofreqIP/s00_axi/reg0] -force
   assign_bd_address -offset 0x00000000 -range 0x20000000 -target_address_space [get_bd_addr_spaces axi_dma/Data_S2MM] [get_bd_addr_segs processing_system7/S_AXI_HP0/HP0_DDR_LOWOCM] -force
 
