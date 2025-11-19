@@ -75,8 +75,14 @@ module ro_freq_calc #(parameter SIZE = 32)(
 
 
     (* keep = "true" *) reg ssf; // single sample flag
-    (* keep = "true" *)reg restart;
-    (* keep = "true" *)wire [31:0] tm_out;
+    (* keep = "true" *) reg restart;
+    (* keep = "true" *) wire [31:0] tm_src;
+
+    (* keep = "true" *) reg [31:0] tm_out;    
+    (* keep = "true" *) reg [31:0] tm_not;
+    (* keep = "true" *) reg [31:0] tm_nor;
+    (* keep = "true" *) reg [31:0] tm_nand;
+    
 
 
     // Ring Oscillator Enable Logic
@@ -127,8 +133,67 @@ module ro_freq_calc #(parameter SIZE = 32)(
         .clk(clk),          // System clock domain
         .nrst(nrst),        // System reset
         .restart(tx_en),   // Start new measurement cycle
-        .out(tm_out)        // Current count value
+        .out(tm_src)        // Current count value
     );
+
+    //--------------------------------------------------------------------------------
+    // Clock Domain Crossing Synchronizers + Synchronizing delay
+    // Safe transfer of counter values from system clock domain to RO clock domains 
+    // Uses multi-stage synchronization to prevent metastability
+    //--------------------------------------------------------------------------------
+
+    reg [31:0] c2r_sync_not;
+    reg [31:0] c2r_sync_nor;
+    reg [31:0] c2r_sync_nand;
+    reg [31:0] sync_delay;
+    
+    // synchronizing clock delay due to synchronizers
+    always @ (posedge clk, negedge  nrst) begin
+        if( !nrst ) begin
+            sync_delay <= 0 ; 
+            tm_out <=0 ; 
+        end
+        else begin
+            sync_delay <= tm_src;
+            tm_out <= sync_delay;
+        end
+    end
+    
+    //synchronizer from clock domain to ring oscillator not
+    always @ (posedge ro_wire[0], negedge  nrst) begin
+        if( !nrst ) begin
+            c2r_sync_not <= 0 ; 
+            tm_not <=0 ; 
+        end
+        else begin
+            c2r_sync_not <= tm_src;
+            tm_not <= c2r_sync_not;
+        end
+    end
+    
+    //synchronizer from clock domain to ring oscillator nor
+    always @ (posedge ro_wire[1], negedge  nrst) begin
+        if( !nrst ) begin
+            c2r_sync_nor <= 0 ; 
+            tm_nor <=0 ; 
+        end
+        else begin
+            c2r_sync_nor <= tm_src;
+            tm_nor <= c2r_sync_nor;
+        end
+    end
+    
+    //synchronizer from clock domain to ring oscillator nand
+    always @ (posedge ro_wire[2], negedge  nrst) begin
+        if( !nrst ) begin
+            c2r_sync_nand <= 0 ; 
+            tm_nand <=0 ; 
+        end
+        else begin
+            c2r_sync_nand <= tm_src;
+            tm_nand <= c2r_sync_nand;
+        end
+    end
 
     //--------------------------------------------------------------------------------
     // Ring Oscillator Instantiations
@@ -167,7 +232,7 @@ module ro_freq_calc #(parameter SIZE = 32)(
     ro_counter #(.SIZE(SIZE)) ro_not_counter (
         .clk(ro_wire[0]),              // Counts RO oscillations
         .nrst(nrst),                // System reset
-        .tm_count(tm_out),             // time measurement count     
+        .tm_count(tm_not),             // time measurement count     
         .out(rofc_not_out_async),      // Asynchronous count value
         .valid(rofc_not_valid_async)   // Measurement complete flag
     );
@@ -176,7 +241,7 @@ module ro_freq_calc #(parameter SIZE = 32)(
     ro_counter #(.SIZE(SIZE)) ro_nor_counter (
         .clk(ro_wire[1]),              // Counts RO oscillations
         .nrst(nrst),                // System reset
-        .tm_count(tm_out),             // time measurement count     
+        .tm_count(tm_nor),             // time measurement count     
         .out(rofc_nor_out_async),      // Asynchronous count value
         .valid(rofc_nor_valid_async)   // Measurement complete flag
     );
@@ -185,7 +250,7 @@ module ro_freq_calc #(parameter SIZE = 32)(
     ro_counter #(.SIZE(SIZE)) ro_nand_counter (
         .clk(ro_wire[2]),              // Counts RO oscillations
         .nrst(nrst),                // System reset
-        .tm_count(tm_out),             // time measurement count 
+        .tm_count(tm_nand),             // time measurement count 
         .out(rofc_nand_out_async),     // Asynchronous count value
         .valid(rofc_nand_valid_async)  // Measurement complete flag
     );
@@ -197,7 +262,7 @@ module ro_freq_calc #(parameter SIZE = 32)(
     //--------------------------------------------------------------------------------
 
     // NOT RO Synchronizer
-    syncronizer not_sync_inst (
+    synchronizer not_sync_inst (
         .clk(clk),                     // System clock
         .nrst(nrst),                   // System reset
         .async_in(rofc_not_out_async), // Async counter value
@@ -207,7 +272,7 @@ module ro_freq_calc #(parameter SIZE = 32)(
     );
 
     // NOR RO Synchronizer
-    syncronizer nor_sync_inst (
+    synchronizer nor_sync_inst (
         .clk(clk),                     // System clock
         .nrst(nrst),                   // System reset
         .async_in(rofc_nor_out_async), // Async counter value
@@ -217,7 +282,7 @@ module ro_freq_calc #(parameter SIZE = 32)(
     );
 
     // NAND RO Synchronizer
-    syncronizer nand_sync_inst (
+    synchronizer nand_sync_inst (
         .clk(clk),                     // System clock
         .nrst(nrst),                   // System reset
         .async_in(rofc_nand_out_async), // Async counter value

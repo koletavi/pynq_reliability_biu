@@ -36,7 +36,7 @@
 //
 //////////////////////////////////////////////////////////////////////////////////
 
-module syncronizer #(parameter SIZE = 32)(
+module synchronizer #(parameter SIZE = 32)(
     // Clock and Reset
     input                 clk,       // Destination clock
     input                 nrst,      // Active-low reset
