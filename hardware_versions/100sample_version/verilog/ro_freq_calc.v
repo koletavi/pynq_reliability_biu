@@ -40,7 +40,7 @@ module ro_freq_calc #(parameter SIZE = 32)(
     input                 tx_en, // data transfer enable signal
     // Measurement Output Interface
     output     [SIZE-1:0] rofc_out,
-    output                rofc_valid,
+    output reg               rofc_valid,
     output     [2:0]      ro_out
 );
 
@@ -72,19 +72,29 @@ module ro_freq_calc #(parameter SIZE = 32)(
     (* keep = "true" *) wire rofc_not_valid;     // Synchronized NOT valid
     (* keep = "true" *) wire rofc_nor_valid;     // Synchronized NOR valid
     (* keep = "true" *) wire rofc_nand_valid;    // Synchronized NAND valid
+    (* keep = "true" *) wire rofc_valid_w;
+    (* keep = "true" *) reg rofc_valid_r;
 
 
     (* keep = "true" *) reg ssf; // single sample flag
     (* keep = "true" *) reg restart;
     (* keep = "true" *) wire [31:0] tm_src;
 
+    (* keep = "true" *) wire ro_stop;
+    (* keep = "true" *) wire ro_restart;
+
     (* keep = "true" *) reg [31:0] tm_out;    
     (* keep = "true" *) reg [31:0] tm_not;
     (* keep = "true" *) reg [31:0] tm_nor;
     (* keep = "true" *) reg [31:0] tm_nand;
-    
-
-
+    (* keep = "true" *) reg tm_stop;
+    (* keep = "true" *) reg tm_restart;
+    (* keep = "true" *) reg ro_stop_not;
+    (* keep = "true" *) reg ro_stop_nor;
+    (* keep = "true" *) reg ro_stop_nand;
+    (* keep = "true" *) reg ro_restart_not;
+    (* keep = "true" *) reg ro_restart_nor;
+    (* keep = "true" *) reg ro_restart_nand;
     // Ring Oscillator Enable Logic
     // Only one RO is enabled at a time to prevent interference
     // ro_select determines which RO is active when ro_en is high
@@ -110,16 +120,18 @@ module ro_freq_calc #(parameter SIZE = 32)(
     // Controls data validity between measurements:
     // - Sets when timer reaches zero (measurement complete)
     // - Clears when data is transferred (tx_en)
+/*
     always @(posedge clk or negedge nrst) begin
         if(!nrst) begin
             ssf <= 0;  // Clear flag on reset
         end
         else begin
-	    if( restart) ssf <= 0;
-            else if (tm_out == COUNTER_PERIODS) ssf <= 1;  // Set when measurement complete
-            else       ssf <= 0;  // Clear when data transferred
+	    if (rofc_valid_select) 
+	       ssf <= 1;
+	    else if (tm_restart)
+	       ssf <=0;
         end
-    end
+    end*/
 
     //--------------------------------------------------------------------------------
     // Time Measurement Counter
@@ -133,7 +145,9 @@ module ro_freq_calc #(parameter SIZE = 32)(
         .clk(clk),          // System clock domain
         .nrst(nrst),        // System reset
         .restart(tx_en),   // Start new measurement cycle
-        .out(tm_src)        // Current count value
+		.ro_stop(ro_stop),
+		.ro_restart(ro_restart)
+        //.out(tm_src)        // Current count value
     );
 
     //--------------------------------------------------------------------------------
@@ -142,20 +156,22 @@ module ro_freq_calc #(parameter SIZE = 32)(
     // Uses multi-stage synchronization to prevent metastability
     //--------------------------------------------------------------------------------
 
-    reg [31:0] c2r_sync_not;
-    reg [31:0] c2r_sync_nor;
-    reg [31:0] c2r_sync_nand;
-    reg [31:0] sync_delay;
+    reg [1:0] c2r_sync_not;
+    reg [1:0] c2r_sync_nor;
+    reg [1:0] c2r_sync_nand;
+    reg [1:0] sync_delay;
     
     // synchronizing clock delay due to synchronizers
     always @ (posedge clk, negedge  nrst) begin
         if( !nrst ) begin
             sync_delay <= 0 ; 
-            tm_out <=0 ; 
+            tm_stop <= 0 ;
+			tm_restart <= 0;
         end
         else begin
-            sync_delay <= tm_src;
-            tm_out <= sync_delay;
+            sync_delay <= {ro_restart,ro_stop};
+            tm_stop <= sync_delay[0];
+			tm_restart <= sync_delay[1];
         end
     end
     
@@ -163,11 +179,14 @@ module ro_freq_calc #(parameter SIZE = 32)(
     always @ (posedge ro_wire[0], negedge  nrst) begin
         if( !nrst ) begin
             c2r_sync_not <= 0 ; 
-            tm_not <=0 ; 
+            ro_stop_not <= 0 ;
+			ro_restart_not <= 0 ;
         end
         else begin
-            c2r_sync_not <= tm_src;
-            tm_not <= c2r_sync_not;
+            c2r_sync_not[0] <= ro_stop;
+            c2r_sync_not[1] <= ro_restart;
+            ro_stop_not <= c2r_sync_not[0];
+			ro_restart_not <= c2r_sync_not[1];
         end
     end
     
@@ -175,11 +194,14 @@ module ro_freq_calc #(parameter SIZE = 32)(
     always @ (posedge ro_wire[1], negedge  nrst) begin
         if( !nrst ) begin
             c2r_sync_nor <= 0 ; 
-            tm_nor <=0 ; 
+            ro_stop_nor <= 0 ;
+			ro_restart_nor <= 0 ;
         end
         else begin
-            c2r_sync_nor <= tm_src;
-            tm_nor <= c2r_sync_nor;
+            c2r_sync_nor[0] <= ro_stop;
+            c2r_sync_nor[1] <= ro_restart;
+            ro_stop_nor <= c2r_sync_nor[0];
+			ro_restart_nor <= c2r_sync_nor[1];
         end
     end
     
@@ -187,11 +209,14 @@ module ro_freq_calc #(parameter SIZE = 32)(
     always @ (posedge ro_wire[2], negedge  nrst) begin
         if( !nrst ) begin
             c2r_sync_nand <= 0 ; 
-            tm_nand <=0 ; 
+            ro_stop_nand <= 0 ;
+			ro_restart_nand <= 0 ;
         end
         else begin
-            c2r_sync_nand <= tm_src;
-            tm_nand <= c2r_sync_nand;
+            c2r_sync_nand[0] <= ro_stop;
+            c2r_sync_nand[1] <= ro_restart;
+            ro_stop_nand <= c2r_sync_nand[0];
+			ro_restart_nand <= c2r_sync_nand[1];
         end
     end
 
@@ -232,7 +257,8 @@ module ro_freq_calc #(parameter SIZE = 32)(
     ro_counter #(.SIZE(SIZE)) ro_not_counter (
         .clk(ro_wire[0]),              // Counts RO oscillations
         .nrst(nrst),                // System reset
-        .tm_count(tm_not),             // time measurement count     
+        .tm_stop(ro_stop_not),
+		.tm_restart(ro_restart_not),   
         .out(rofc_not_out_async),      // Asynchronous count value
         .valid(rofc_not_valid_async)   // Measurement complete flag
     );
@@ -241,7 +267,8 @@ module ro_freq_calc #(parameter SIZE = 32)(
     ro_counter #(.SIZE(SIZE)) ro_nor_counter (
         .clk(ro_wire[1]),              // Counts RO oscillations
         .nrst(nrst),                // System reset
-        .tm_count(tm_nor),             // time measurement count     
+        .tm_stop(ro_stop_nor),
+		.tm_restart(ro_restart_nor),   
         .out(rofc_nor_out_async),      // Asynchronous count value
         .valid(rofc_nor_valid_async)   // Measurement complete flag
     );
@@ -250,7 +277,8 @@ module ro_freq_calc #(parameter SIZE = 32)(
     ro_counter #(.SIZE(SIZE)) ro_nand_counter (
         .clk(ro_wire[2]),              // Counts RO oscillations
         .nrst(nrst),                // System reset
-        .tm_count(tm_nand),             // time measurement count 
+        .tm_stop(ro_stop_nand),
+		.tm_restart(ro_restart_nand),   
         .out(rofc_nand_out_async),     // Asynchronous count value
         .valid(rofc_nand_valid_async)  // Measurement complete flag
     );
@@ -299,16 +327,37 @@ module ro_freq_calc #(parameter SIZE = 32)(
     // valid Signal Selection and Qualification
     // - Selects appropriate valid signal based on RO type
     // - Qualifies with Sample Storage Flag (ssf) for synchronized output
-    assign rofc_valid_select = (ro_select == 2'b00) ? rofc_not_valid :  // NOT RO
+    assign rofc_valid_w = (ro_select == 2'b00) ? rofc_not_valid :  // NOT RO
                        (ro_select == 2'b01) ? rofc_nor_valid :          // NOR RO
                        (ro_select == 2'b10 || ro_select == 2'b11) ?     // NAND RO
                        rofc_nand_valid : 0;                             // Default
 
+
+    always @ (posedge clk, negedge nrst) begin
+        if(!nrst) begin
+            rofc_valid_r <= 0;
+        end
+        else begin
+                rofc_valid_r <= rofc_valid_w;
+        end
+    end
+
+
     // Final Valid Signal
     // Combines RO-specific valid signal with sample storage flag
     // Ensures data is only valid when measurement is complete and stored
-    assign rofc_valid = rofc_valid_select && ssf && !restart ;
-
+   always @ (posedge clk, negedge nrst) begin
+        if(!nrst) begin
+            rofc_valid <= 0;
+        end
+        else begin
+            if(rofc_valid_w && !rofc_valid_r)
+                rofc_valid <= 1 ;
+            else
+            if(tx_en)
+                rofc_valid <= 0 ;
+        end
+    end
     // Measurement Output Selection
     // Routes the selected RO's frequency measurement to output
     // Output is qualified by rofc_valid signal

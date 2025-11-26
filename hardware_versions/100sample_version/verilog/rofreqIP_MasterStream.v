@@ -83,8 +83,10 @@ module rofreqIP_MasterStream #
     (* keep = "true" *) wire [1:0] ro_select;         // Ring oscillator type selection
     
     // Measurement Control and Status
-    (* keep = "true" *) reg [31:0] read_pointer;      // Number of samples streamed
-    (* keep = "true" *) wire tx_en;                   // Transfer enable for AXI stream
+    (* keep = "true" *) reg [31:0] read_pointer;     // Number of samples streamed
+    (* keep = "true" *) wire tx_en_w;                // Transfer enable for AXI stream wire
+    (* keep = "true" *) reg tx_en_r;                 // Transfer enable for AXI stream register 
+    (* keep = "true" *) reg tx_en;                   // Transfer enable for AXI stream final
     (* keep = "true" *) reg [C_M_AXIS_TDATA_WIDTH-1 : 0] data_out;  // Register holding current measurement
     
     // Ring Oscillator Interface
@@ -208,7 +210,24 @@ module rofreqIP_MasterStream #
         // end
     // end
 
-assign tx_en = (M_AXIS_TREADY && rofc_valid) ? 1 : 0 ;
+assign tx_en_w = (M_AXIS_TREADY && rofc_valid) ? 1 : 0 ;
+
+always @ (posedge M_AXIS_ACLK , negedge M_AXIS_ARESETN)begin
+    if(!M_AXIS_ARESETN)
+        tx_en_r <= 0;
+    else
+        tx_en_r <= tx_en_w;
+end
+
+always @ (posedge M_AXIS_ACLK , negedge M_AXIS_ARESETN)begin
+    if(!M_AXIS_ARESETN)
+        tx_en <= 0;
+    else
+        if(tx_en_w && !tx_en_r)
+            tx_en <= 1;
+        else
+            tx_en <= 0;
+end
 //--------------------------------------------------------------------------------
 // Ring Oscillator Frequency Measurement System
 // Core measurement subsystem managing all RO variants
