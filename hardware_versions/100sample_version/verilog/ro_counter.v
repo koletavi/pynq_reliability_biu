@@ -32,8 +32,8 @@ module ro_counter #(parameter MAX_COUNT = 100 , SIZE = $clog2(MAX_COUNT) ) (
     // Clock and Control
     input                   clk,      // Clock input (async from RO)
     input                   nrst,     // Active-low reset
-    input					tm_stop,
-	input					tm_restart,
+    input					stop,
+	input					restart,
     
     // Counter Outputs
     output reg [SIZE-1:0]   out,      // Current count value
@@ -58,8 +58,8 @@ module ro_counter #(parameter MAX_COUNT = 100 , SIZE = $clog2(MAX_COUNT) ) (
             out <= 0;                 // Asynchronous reset
         end
         else begin
-            if(tm_restart) out <= 0 ;            // Synchronous reset on restart
-            else if(!tm_stop)
+            if(restart) out <= 0 ;            // Synchronous reset on restart
+            else if(!stop)
                 out <= out_next;      // Normal counting operation
             else 
                 out <= out;           // hold the count when tm_count reached MAX_COUNT
@@ -75,7 +75,7 @@ module ro_counter #(parameter MAX_COUNT = 100 , SIZE = $clog2(MAX_COUNT) ) (
             valid <= 0;              // Clear valid on reset
         end
         else begin
-            if ( tm_stop )
+            if ( stop )
                 valid <= 1;          // Set valid when measurement window ends
             else 
                 valid <= 0;          // Clear valid otherwise

@@ -32,18 +32,17 @@ module tm_counter #( parameter SIZE = 32 , MAX_COUNT = 100 ) (
     input                   nrst,     // Active-low reset
     input                   restart,   
 
-	output					ro_stop,
-	output					ro_restart
+	output					tm100
 
 );
     
     // Internal Signals
     wire [SIZE-1:0] count_next;        // Next counter value
     reg [SIZE-1:0]   count;
+    wire ro_stop_w;
 	reg ro_stop_r;
-	reg ro_restart_r;
-	wire ro_stop_w;
-	wire ro_restart_w;
+    reg ro_stop;
+	
 //--------------------------------------------------------------------------------
     // Counter Logic
     // Implements basic counting functionality with synchronous control
@@ -65,38 +64,32 @@ module tm_counter #( parameter SIZE = 32 , MAX_COUNT = 100 ) (
         end
     end
 
+    assign ro_stop_w = (count == MAX_COUNT) ? 1'b1 : 1'b0;
 
-	always @(*) begin
-		if(count == MAX_COUNT)
-			ro_stop_r = 1;
-		else 
-			ro_stop_r = 0;
+	always @(posedge clk, negedge nrst) begin
+        if(!nrst) begin
+            ro_stop_r <= 1'b0;                 // Asynchronous reset
+        end
+        else begin
+            ro_stop_r <= ro_stop_w;
+        end
 		
     end
 	
-	always @(*) begin
-		if(count == 0)
-			ro_restart_r = 1;
-		else
-			ro_restart_r = 0;
-	end
+    always @(posedge clk, negedge nrst) begin
+        if(!nrst) begin
+            ro_stop <= 1'b0;                 // Asynchronous reset
+        end
+        else begin
+            if (ro_stop_w && !ro_stop_r)
+                ro_stop <= 1'b1;
+            else
+                ro_stop <= 1'b0;
+        end
+        
+    end
 	
-	freq_div #(.DIV_LEN(2)) restart_div (
-		.clk(clk),
-		.nrst(nrst),
-		.in(ro_restart_r),
-		.div(ro_restart_w)
-	);
-	
-	freq_div #(.DIV_LEN(2)) stop_div (
-		.clk(clk),
-		.nrst(nrst),
-		.in(ro_stop_r),
-		.div(ro_stop_w)
-	);
-	
-	assign ro_stop = ro_stop_w;
-	assign ro_restart = ro_restart_w;
+	assign tm100 = ro_stop;
 	
 endmodule
 

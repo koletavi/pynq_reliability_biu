@@ -240,9 +240,7 @@ end
         .tx_en(tx_en),         // Data transfer enable
         .rofc_out(rofc_out),        // Frequency measurement output
         .ro_out(RO_GPIO_OUT),       // Direct RO outputs for debug
-        .rofc_valid(rofc_valid)     // Measurement valid indicator
+        .valid(rofc_valid)     // Measurement valid indicator
     );
-
-    
 
 endmodule
