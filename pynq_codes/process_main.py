@@ -88,7 +88,7 @@ REGISTERS = [
 # controller program 1 setup
 lc = 0 # LC: Loop Control - 0=RPT 1=HOLD 2=P1 3=P2
 ssp = 24 # SSP: starting setpoint in degrees Celsius !- must be lesser then measured temperatures - ! 
-temperature_list = [ 120 , 121 , 132 , 133 ]
+temperature_list = [ 80 , 90 , 100 , 110 ]
 temperature_enable = [ 1 , 0 , 0 , 0 ] # Enable or disable each temperature in the list 1 = enabled, 0 = disabled
 time_list = [ 10 , 60*35 ] # rise time and hold time in minutes
 
@@ -96,7 +96,93 @@ time_list = [ 10 , 60*35 ] # rise time and hold time in minutes
 stability_standard_deviation = 5  # Standard deviation threshold for stability
 stability_threshold = 60*2 # time in 60*minutes that the process must be stable before triggering PYNQ-Z2
 
-pynq_wait_threshold = 60*30  # Minimum wait time in 60*minutes before triggering PYNQ-Z2 again
+# Default wait threshold (seconds)
+pynq_wait_threshold = 60*30  # Minimum wait time in seconds before triggering PYNQ-Z2 again
+
+# Attempt to load `config.py` from the same folder as this script. If the file
+# does not exist, we continue with defaults. If it exists, its values are
+# treated as authoritative: any validation failure will stop execution and
+# print the exact violation the user must fix.
+config_path = os.path.join(os.path.dirname(__file__), 'config.py')
+if os.path.exists(config_path):
+    try:
+        import importlib.util
+        spec = importlib.util.spec_from_file_location('user_config', config_path)
+        user_config = importlib.util.module_from_spec(spec)
+        assert spec and spec.loader
+        spec.loader.exec_module(user_config)
+        print(f"Loaded configuration from {config_path}")
+
+        # Helper validation functions (raise SystemExit on first violation)
+        def _is_list_of_numbers_strict(v, name):
+            if not isinstance(v, list) or not all(isinstance(x, (int, float)) for x in v):
+                raise SystemExit(f"Configuration error: `{name}` must be a list of numbers.")
+            return True
+
+        def _is_list_of_ints_0_1_strict(v, name):
+            if not isinstance(v, list):
+                raise SystemExit(f"Configuration error: `{name}` must be a list of 0/1 values.")
+            for x in v:
+                if int(x) not in (0, 1):
+                    raise SystemExit(f"Configuration error: `{name}` contains non-binary value {x}.")
+            return True
+
+        # temperature_list: strict validation
+        if hasattr(user_config, 'temperature_list'):
+            _is_list_of_numbers_strict(user_config.temperature_list, 'temperature_list')
+            candidate = [int(x) for x in user_config.temperature_list]
+            for x in candidate:
+                if x < 80 or x > 110:
+                    raise SystemExit(f"Configuration error: temperature_list value {x} out of allowed range [80, 110].")
+            for a, b in zip(candidate, candidate[1:]):
+                if not (b > a):
+                    raise SystemExit(f"Configuration error: temperature_list must be strictly increasing (found {a} then {b}).")
+            temperature_list = candidate
+            print(f"Using `temperature_list` from config: {temperature_list}")
+
+        # temperature_enable: strict validation
+        if hasattr(user_config, 'temperature_enable'):
+            _is_list_of_ints_0_1_strict(user_config.temperature_enable, 'temperature_enable')
+            candidate = [int(x) for x in user_config.temperature_enable]
+            if len(candidate) != len(temperature_list):
+                raise SystemExit("Configuration error: `temperature_enable` length must match `temperature_list` length.")
+            seen_zero = False
+            for i, val in enumerate(candidate):
+                if seen_zero and val == 1:
+                    raise SystemExit(f"Configuration error: `temperature_enable` must be ones followed by zeros (prefix rule violated at index {i}).")
+                if val == 0:
+                    seen_zero = True
+            temperature_enable = candidate
+            print(f"Using `temperature_enable` from config: {temperature_enable}")
+
+        # time_list: strict validation (must be exactly two values >= 10)
+        if hasattr(user_config, 'time_list'):
+            _is_list_of_numbers_strict(user_config.time_list, 'time_list')
+            candidate = [int(x) for x in user_config.time_list]
+            if len(candidate) != 2:
+                raise SystemExit("Configuration error: `time_list` must contain exactly two values (rise and hold).")
+            if candidate[0] < 10 or candidate[1] < 10:
+                raise SystemExit("Configuration error: Both values in `time_list` must be at least 10 minutes.")
+            time_list = candidate
+            print(f"Using `time_list` from config: {time_list}")
+
+        # pynq_wait_threshold: strict validation (>= 60*2 seconds)
+        if hasattr(user_config, 'pynq_wait_threshold'):
+            if not isinstance(user_config.pynq_wait_threshold, (int, float)):
+                raise SystemExit("Configuration error: `pynq_wait_threshold` must be a number (seconds).")
+            candidate = int(user_config.pynq_wait_threshold)
+            if candidate < 60*2:
+                raise SystemExit(f"Configuration error: `pynq_wait_threshold` must be at least {60*2} seconds.")
+            pynq_wait_threshold = candidate
+            print(f"Using `pynq_wait_threshold` from config: {pynq_wait_threshold} seconds")
+
+    except SystemExit:
+        # Re-raise system exit so the program stops with the provided message
+        raise
+    except Exception as exc:
+        raise SystemExit(f"Error loading config.py: {exc}")
+else:
+    print("No `config.py` found — using built-in defaults.")
 #--------------------------------#
 ##### Oven Control Functions #####
 #--------------------------------#

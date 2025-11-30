@@ -1,39 +1,49 @@
 import matplotlib.pyplot as plt
-
-def plot_avg_bar_graph(csv_path, gate_type):
-    """Reads the given CSV file and plots a bar graph of the average values in the last row."""
-    with open(csv_path, newline='') as f:
-        reader = list(csv.reader(f))
-        if not reader or len(reader) < 2:
-            print("CSV file is empty or too short.")
-            return
-        headers = reader[0]
-        avg_row = reader[-1]
-        # Convert to float, skip empty or non-numeric and the 'Time' column
-        values = []
-        labels = []
-        for h, v in zip(headers[1:], avg_row[1:]):  # Skip first column (Time)
-            try:
-                val = float(v)
-                values.append(val)
-                # Extract just the time and index from the header
-                time_index = h.split('min_')  # Split at 'min_'
-                labels.append(f"{float(time_index[0]):.2f}min_{time_index[1]}")
-            except (ValueError, TypeError):
-                continue
-        plt.figure(figsize=(10, 6))
-        plt.bar(labels, values)
-        plt.xlabel('Time (minutes)')
-        plt.ylabel('Average Value')
-        plt.title(f'Average Values for {gate_type.upper()} Gates')
-        plt.xticks(rotation=45, ha='right')
-        plt.tight_layout()
-        plt.show()
 import os
 import csv
 import re
 from collections import defaultdict
 
+
+def plot_avg_bar_graph(csv_path, gate_type):
+    """Reads the given CSV file and plots a bar graph of the average values in the last row.
+
+    Uses a context manager to ensure the CSV file is closed even on exceptions.
+    Closes the matplotlib figure after showing to free resources.
+    """
+    with open(csv_path, newline='') as f:
+        reader = list(csv.reader(f))
+    # file is closed here because of the with-block
+
+    if not reader or len(reader) < 2:
+        print("CSV file is empty or too short.")
+        return
+
+    headers = reader[0]
+    avg_row = reader[-1]
+
+    # Convert to float, skip empty or non-numeric and the 'Time' column
+    values = []
+    labels = []
+    for h, v in zip(headers[1:], avg_row[1:]):  # Skip first column (Time)
+        try:
+            val = float(v)
+            values.append(val)
+            # Extract just the time and index from the header
+            time_index = h.split('min_')  # Split at 'min_'
+            labels.append(f"{float(time_index[0]):.2f}min_{time_index[1]}")
+        except (ValueError, TypeError):
+            continue
+
+    plt.figure(figsize=(10, 6))
+    plt.bar(labels, values)
+    plt.xlabel('Time (minutes)')
+    plt.ylabel('Average Value')
+    plt.title(f'Average Values for {gate_type.upper()} Gates')
+    plt.xticks(rotation=45, ha='right')
+    plt.tight_layout()
+    plt.show()
+    plt.close()  # free figure resources
 # Base directory for all data
 LOCAL_OUTPUT_DIR = r"C:\pynq\pynq_data"
 # Directory containing the input CSV files from PYNQ runs
@@ -87,11 +97,7 @@ def write_avg_csv_for_temp(temp, files, directory):
     
     # Process each gate type separately
     for gate_type, gate_files in gate_groups.items():
-        # Process files for the given temperature and gate type
-        data = [read_csv_ignore_zeros(os.path.join(directory, f)) for f in gate_files]
-        num_rows = max(len(d) for d in data)
-        
-        # Prepare header with time information in minutes
+        # Prepare header with time information in minutes and sort by time first
         header_info = []
         for f in gate_files:
             match = pattern.match(f)
@@ -102,13 +108,17 @@ def write_avg_csv_for_temp(temp, files, directory):
                 index = match.group(6)
                 total_minutes = (hours * 60) + mins + (secs / 60)
                 header_info.append((total_minutes, index, f))
-        
+
         # Sort by time
         header_info.sort(key=lambda x: x[0])
-        
+
         # Create sorted headers and reorganize files list to match
         header = [f"{h[0]:.2f}min_{h[1]}" for h in header_info]
         gate_files = [h[2] for h in header_info]
+
+        # Now read CSV data in the sorted order so that data matches header/file order
+        data = [read_csv_ignore_zeros(os.path.join(directory, f)) for f in gate_files]
+        num_rows = max((len(d) for d in data), default=0)
     
         # Write output
         os.makedirs(AVG_OUTPUT_DIR, exist_ok=True)
