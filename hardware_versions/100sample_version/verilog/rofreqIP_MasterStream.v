@@ -21,9 +21,9 @@
 //   Control Register [31:0]:
 //     [0]    - start_run: Start measurement sequence (1 = start)
 //     [2:1]  - ro_select: RO type selection
-//              00: NOT-based RO
-//              01: NOR-based RO
-//              10/11: NAND-based RO
+//              00: 11 step NOT-based RO
+//              01: 21 step NOT-based RO
+//              10/11: 51 step NOT-based RO
 //     [31:3] - Reserved for future use
 //
 //   Runtime Register [31:0]:

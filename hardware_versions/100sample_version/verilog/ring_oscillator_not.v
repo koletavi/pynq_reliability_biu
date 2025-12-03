@@ -38,16 +38,24 @@ module ring_oscillator_not #(parameter RO_LENGTH = 21) (
     input enable,
     output out
     );
-    
-     (* KEEP *) wire [RO_LENGTH:0] nw ;
-    genvar i ;
-    
-    generate 
-        for ( i=0 ; i <RO_LENGTH ; i=i+1) begin
-           (* DONT_TOUCH *) not(nw[i+1],nw[i]);
-        end
-    endgenerate 
-    
-    assign nw[0] = enable ? nw[RO_LENGTH] : 0 ;
-    assign out = nw[RO_LENGTH] ; 
+   
+    (* DONT_TOUCH = "true", KEEP = "true", KEEP_HIERARCHY = "true" *) wire [RO_LENGTH-1:0] nw;
+
+
+    assign nw[0] = enable ? ~nw[RO_LENGTH-1] : 1'b0;
+
+  generate
+    genvar i;
+    for (i = 1; i < RO_LENGTH; i = i + 1) begin : ro_luts
+      (* DONT_TOUCH = "true", KEEP = "true" *) 
+      LUT1 #(
+        .INIT(2'b01)         // logical NOT
+      ) lut_inst (
+        .I0 (nw[i-1]),
+        .O  (nw[i])
+      );
+    end
+  endgenerate
+
+  assign out = nw[RO_LENGTH-1];
 endmodule
