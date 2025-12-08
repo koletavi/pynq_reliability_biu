@@ -14,13 +14,13 @@ else:
     TEMP = "0"
     TIME = "0_0_0_time"
 # Configuration
-PYNQ_IP = "169.254.226.99"
+PYNQ_IP = "169.254.168.99"
 USERNAME = "xilinx"
 PASSWORD = "xilinx"  # Replace with your actual password or use SSH key
 NOTEBOOKS = [
-    ("rofc_not.ipynb", "output_data_not.csv"),
-    ("rofc_nor.ipynb", "output_data_nor.csv"),
-    ("rofc_nand.ipynb", "output_data_nand.csv"),
+    ("rofc_11.ipynb", "output_data_11.csv"),
+    ("rofc_21.ipynb", "output_data_21.csv"),
+    ("rofc_51.ipynb", "output_data_51.csv"),
 ]
 REMOTE_NOTEBOOK_DIR = "/home/xilinx/jupyter_notebooks/rofc/"
 LOCAL_OUTPUT_DIR = r"C:\pynq\pynq_data"

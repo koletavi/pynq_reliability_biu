@@ -2,10 +2,10 @@
 # Edit the values below to change the oven process behavior.
 
 # temperature_list: list of setpoint temperatures in degrees Celsius.
-# Example: [90, 100, 105, 110]
+# Example: [80, 90, 100, 110]
 
 # Note: values should be numbers (int). Keep as a Python list.
-temperature_list = [90, 100, 105, 110]
+temperature_list = [80, 90, 100, 110]
 
 # temperature_enable: list of 0/1 flags indicating if the corresponding
 # temperature in `temperature_list` is enabled (1) or disabled (0).
@@ -18,9 +18,9 @@ temperature_enable = [1, 0, 0, 0]
 # Example: [10, 60*35]  # rise time 10 minutes, hold time 35 hours (if intended)
 
 # Use integers or expressions (they will be evaluated by Python).
-time_list = [10, 60*35]
+time_list = [10, 60*1]
 
 # pynq_wait_threshold: minimum time to wait between triggering the PYNQ-Z2 in seconds.
 # Example: 60*30  # 30 minutes
-pynq_wait_threshold = 60*30
+pynq_wait_threshold = 60*10
 
