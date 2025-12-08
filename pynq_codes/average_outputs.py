@@ -3,6 +3,7 @@ import os
 import csv
 import re
 from collections import defaultdict
+from datetime import datetime
 
 
 def plot_avg_bar_graph(csv_path, gate_type):
@@ -50,6 +51,7 @@ LOCAL_OUTPUT_DIR = r"C:\pynq\pynq_data"
 LOCAL_PYNQ_DATA_DIR = os.path.join(LOCAL_OUTPUT_DIR, "pynq_run_data")
 # Directory for averaged output files
 AVG_OUTPUT_DIR = os.path.join(LOCAL_OUTPUT_DIR, "averages")
+LOG_DIR = os.path.join(LOCAL_OUTPUT_DIR, "logs")
 
 
 # Regex to match files like output_data_not_0C_1_2_3_time_4.csv
@@ -164,5 +166,60 @@ def main():
     for temp, files in groups.items():
         write_avg_csv_for_temp(temp, files, LOCAL_PYNQ_DATA_DIR)
 
+def cleanup_pynq_run_data(directory):
+    """Delete CSV files in the given directory that match the expected PYNQ output pattern.
+
+    This removes files like `output_data_<gate>_<temp>_..._time_#.csv` to keep
+    the run directory clean after averages are generated.
+    """
+    for fname in os.listdir(directory):
+        if pattern.match(fname) and fname.lower().endswith('.csv'):
+            try:
+                path = os.path.join(directory, fname)
+                os.remove(path)
+            except OSError:
+                # ignore failures to delete individual files
+                pass
+
+
 if __name__ == "__main__":
     main()
+    # cleanup generated/processed CSV files from the PYNQ run directory
+    cleanup_pynq_run_data(LOCAL_PYNQ_DATA_DIR)
+    # create a single daily summary log from any existing logs and remove originals
+    def create_daily_summary_log(log_dir):
+        os.makedirs(log_dir, exist_ok=True)
+        now = datetime.now()
+        summary_name = f"pynq_log_{now.day:02d}_{now.month:02d}_{str(now.year)[-2:]}.log"
+        summary_path = os.path.join(log_dir, summary_name)
+
+        # collect existing logs excluding today's summary if present
+        files = [f for f in os.listdir(log_dir) if f.lower().endswith('.log') and f != summary_name]
+        if not files:
+            return summary_path
+
+        files.sort()
+        with open(summary_path, 'w', encoding='utf-8') as outf:
+            for fname in files:
+                path = os.path.join(log_dir, fname)
+                try:
+                    with open(path, 'r', encoding='utf-8') as inf:
+                        outf.write(f"--- Start of {fname} ---\n")
+                        outf.write(inf.read())
+                        outf.write(f"\n--- End of {fname} ---\n\n")
+                except Exception:
+                    continue
+
+        # delete originals
+        for fname in files:
+            try:
+                os.remove(os.path.join(log_dir, fname))
+            except Exception:
+                pass
+
+        return summary_path
+
+    try:
+        create_daily_summary_log(LOG_DIR)
+    except Exception:
+        pass
