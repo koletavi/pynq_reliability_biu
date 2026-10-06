@@ -1,0 +1,4 @@
+minimalmodbus>=2.0.1
+paramiko>=2.12.0
+pandas>=1.5.0
+matplotlib>=3.5.0

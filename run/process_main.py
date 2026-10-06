@@ -1,20 +1,33 @@
 # this script should run the oven control system side and call the other script that handles the pynq side and live graphs
 
 import argparse
-import minimalmodbus
 import time
 import subprocess
 import os
 import sys
 from pathlib import Path
 
-import pandas as pd
-import matplotlib.pyplot as plt
+# Bound on a real run, after --check has had a chance to name a missing package.
+minimalmodbus = None
+pd = None
+plt = None
+
+
+def load_run_packages():
+    """Import the packages that talk to the oven and draw the final plot."""
+    global minimalmodbus, pd, plt
+    import minimalmodbus as _minimalmodbus
+    import pandas as _pd
+    import matplotlib.pyplot as _plt
+    minimalmodbus = _minimalmodbus
+    pd = _pd
+    plt = _plt
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 import boards
+import preflight
 
 #--------------------------------#
 ######## Program Paramters #######
@@ -108,90 +121,16 @@ stability_threshold = 60*2 # time in 60*minutes that the process must be stable 
 # Default wait threshold (seconds)
 pynq_wait_threshold = 60*30  # Minimum wait time in seconds before triggering PYNQ-Z2 again
 
-# Attempt to load `config.py` from the same folder as this script. If the file
-# does not exist, we continue with defaults. If it exists, its values are
-# treated as authoritative: any validation failure will stop execution and
-# print the exact violation the user must fix.
-config_path = os.path.join(os.path.dirname(__file__), 'config.py')
-if os.path.exists(config_path):
-    try:
-        import importlib.util
-        spec = importlib.util.spec_from_file_location('user_config', config_path)
-        user_config = importlib.util.module_from_spec(spec)
-        assert spec and spec.loader
-        spec.loader.exec_module(user_config)
-        print(f"Loaded configuration from {config_path}")
-
-        # Helper validation functions (raise SystemExit on first violation)
-        def _is_list_of_numbers_strict(v, name):
-            if not isinstance(v, list) or not all(isinstance(x, (int, float)) for x in v):
-                raise SystemExit(f"Configuration error: `{name}` must be a list of numbers.")
-            return True
-
-        def _is_list_of_ints_0_1_strict(v, name):
-            if not isinstance(v, list):
-                raise SystemExit(f"Configuration error: `{name}` must be a list of 0/1 values.")
-            for x in v:
-                if int(x) not in (0, 1):
-                    raise SystemExit(f"Configuration error: `{name}` contains non-binary value {x}.")
-            return True
-
-        # temperature_list: strict validation
-        if hasattr(user_config, 'temperature_list'):
-            _is_list_of_numbers_strict(user_config.temperature_list, 'temperature_list')
-            candidate = [int(x) for x in user_config.temperature_list]
-            for x in candidate:
-                if x < 80 or x > 110:
-                    raise SystemExit(f"Configuration error: temperature_list value {x} out of allowed range [80, 110].")
-            for a, b in zip(candidate, candidate[1:]):
-                if not (b > a):
-                    raise SystemExit(f"Configuration error: temperature_list must be strictly increasing (found {a} then {b}).")
-            temperature_list = candidate
-            print(f"Using `temperature_list` from config: {temperature_list}")
-
-        # temperature_enable: strict validation
-        if hasattr(user_config, 'temperature_enable'):
-            _is_list_of_ints_0_1_strict(user_config.temperature_enable, 'temperature_enable')
-            candidate = [int(x) for x in user_config.temperature_enable]
-            if len(candidate) != len(temperature_list):
-                raise SystemExit("Configuration error: `temperature_enable` length must match `temperature_list` length.")
-            seen_zero = False
-            for i, val in enumerate(candidate):
-                if seen_zero and val == 1:
-                    raise SystemExit(f"Configuration error: `temperature_enable` must be ones followed by zeros (prefix rule violated at index {i}).")
-                if val == 0:
-                    seen_zero = True
-            temperature_enable = candidate
-            print(f"Using `temperature_enable` from config: {temperature_enable}")
-
-        # time_list: strict validation (must be exactly two values >= 10)
-        if hasattr(user_config, 'time_list'):
-            _is_list_of_numbers_strict(user_config.time_list, 'time_list')
-            candidate = [int(x) for x in user_config.time_list]
-            if len(candidate) != 2:
-                raise SystemExit("Configuration error: `time_list` must contain exactly two values (rise and hold).")
-            if candidate[0] < 10 or candidate[1] < 10:
-                raise SystemExit("Configuration error: Both values in `time_list` must be at least 10 minutes.")
-            time_list = candidate
-            print(f"Using `time_list` from config: {time_list}")
-
-        # pynq_wait_threshold: strict validation (>= 60*2 seconds)
-        if hasattr(user_config, 'pynq_wait_threshold'):
-            if not isinstance(user_config.pynq_wait_threshold, (int, float)):
-                raise SystemExit("Configuration error: `pynq_wait_threshold` must be a number (seconds).")
-            candidate = int(user_config.pynq_wait_threshold)
-            if candidate < 60*2:
-                raise SystemExit(f"Configuration error: `pynq_wait_threshold` must be at least {60*2} seconds.")
-            pynq_wait_threshold = candidate
-            print(f"Using `pynq_wait_threshold` from config: {pynq_wait_threshold} seconds")
-
-    except SystemExit:
-        # Re-raise system exit so the program stops with the provided message
-        raise
-    except Exception as exc:
-        raise SystemExit(f"Error loading config.py: {exc}")
-else:
-    print("No `config.py` found — using built-in defaults.")
+# Load run/config.py. Invalid values stop the program before the oven is touched.
+config_path = os.path.join(os.path.dirname(__file__), "config.py")
+temperature_list, temperature_enable, time_list, pynq_wait_threshold, PORT = preflight.load_recipe(
+    config_path,
+    temperature_list,
+    temperature_enable,
+    time_list,
+    pynq_wait_threshold,
+    PORT,
+)
 #--------------------------------#
 ##### Oven Control Functions #####
 #--------------------------------#
@@ -368,9 +307,74 @@ def parse_args():
     parser.add_argument(
         "--dry-run",
         action="store_true",
-        help="Create output directories and print the board plan without connecting",
+        help="Check run/config.py and print the board plan without connecting",
+    )
+    parser.add_argument(
+        "--check",
+        action="store_true",
+        help="Check the oven port, the boards, and the notebooks. Do not start the oven",
     )
     return parser.parse_args()
+
+
+def format_board_result(board_id, result_path):
+    """One board's part of the round summary, from the file its run wrote."""
+    total = len(boards.NOTEBOOKS)
+    path = Path(result_path) if result_path is not None else None
+    if path is None or not path.is_file():
+        return f"{board_id}: 0/{total} csv (no result)"
+    data = {}
+    for line in path.read_text(encoding="utf-8").splitlines():
+        if "=" not in line:
+            continue
+        key, value = line.split("=", 1)
+        data[key.strip()] = value.strip()
+    ok = data.get("ok", "0")
+    reported_total = data.get("total", str(total))
+    failed = data.get("failed", "")
+    if failed:
+        return f"{board_id}: {ok}/{reported_total} csv ({failed} failed)"
+    return f"{board_id}: {ok}/{reported_total} csv"
+
+
+def print_round_summary(line):
+    """Print one summary line above the live status block.
+
+    The status block redraws the few lines under the cursor. Inserting the
+    summary above that block keeps it on screen.
+    """
+    sys.stdout.write("\033[L" + line + "\033[1E")
+    sys.stdout.flush()
+
+
+def report_finished_rounds(open_rounds):
+    """Print one summary line for each round whose boards have all exited.
+
+    A board's line is saved as soon as that board exits, so a later launch
+    cannot replace the file before the other board in the round finishes.
+    """
+    still_open = []
+    for started in open_rounds:
+        pending = False
+        for board_id, entry in started.items():
+            if entry["line"] is not None:
+                continue
+            process = entry["process"]
+            if process is not None and process.poll() is None:
+                pending = True
+                continue
+            entry["line"] = format_board_result(board_id, entry["result"])
+            result = entry["result"]
+            if result is not None:
+                try:
+                    Path(result).unlink()
+                except OSError:
+                    pass
+        if pending or any(entry["line"] is None for entry in started.values()):
+            still_open.append(started)
+            continue
+        print_round_summary(", ".join(entry["line"] for entry in started.values()))
+    return still_open
 
 
 def prepare_output_dirs():
@@ -399,9 +403,17 @@ def print_board_plan():
 
 # Start one board's measurement if that board is not already running. - 0 seconds wait
 def launch_board(board, previous_process=None, temp=lc, time_str=""):
+    """Start one board, or return the process that is already running.
+
+    The second value is the result-file path for a new process. It is None
+    when this board was left running.
+    """
     try:
         if previous_process is not None and previous_process.poll() is None:
-            return previous_process
+            return previous_process, None
+        board_dir = boards.board_output_dir(board["id"])
+        board_dir.mkdir(parents=True, exist_ok=True)
+        result_path = board_dir / f"round_result_{time.time_ns()}.txt"
         command = [
             sys.executable,
             str(PYNQ_RUN_SCRIPT),
@@ -409,23 +421,32 @@ def launch_board(board, previous_process=None, temp=lc, time_str=""):
             "--ip", board["ip"],
             "--temp", str(temp),
             "--time", time_str,
-            "--output-dir", str(boards.board_output_dir(board["id"])),
+            "--output-dir", str(board_dir),
+            "--result-file", str(result_path),
         ]
-        return subprocess.Popen(command, shell=False)
+        return subprocess.Popen(command, shell=False), result_path
     except Exception as e:
         print(f"\nError executing PYNQ-Z2 script for {board['id']}: {e}")
-        return None
+        return None, None
 
 
 
 
 def main():
     args = parse_args()
-    prepare_output_dirs()
     if args.dry_run:
         print_board_plan()
         print("Dry run only. No oven or board connection was opened.")
         return
+    if args.check:
+        sys.exit(preflight.run_checks(PORT))
+
+    print(f"Oven port: {PORT}")
+    # A failed check must not program or start the oven.
+    if preflight.run_checks(PORT) != 0:
+        sys.exit(1)
+    load_run_packages()
+    prepare_output_dirs()
 
     try:
         print("=== Starting Temperature Control and Data Collection ===\n")
@@ -475,8 +496,10 @@ def main():
 
         last_pynq_sample_time = None
         pynq_waiting = False
+        open_rounds = []
         # Main monitoring loop
         while True:
+            open_rounds = report_finished_rounds(open_rounds)
             # Sample the controller (prints to first display line)
             [ptno, stable, npv ,status_line0] = sample_controller(instrument, start_time, expected_run_time, temperature_file, live_temperature_file)
             current_temperature = round(npv/10)*10  # npv is the current temperature in degrees Celsius rounded to 10s 
@@ -486,6 +509,7 @@ def main():
 
             # Check if the process is complete
             if ptno == 0:
+                open_rounds = report_finished_rounds(open_rounds)
                 print("\nProcess complete.")
                 break  # Exit loop if PTNO is 0 (indicating process completion)
 
@@ -509,15 +533,25 @@ def main():
                 if stable_time >= stability_threshold:
                     if not pynq_waiting:
                         status_parts = []
+                        started = {}
                         for board in active_boards:
-                            process = launch_board(board, board_processes[board["id"]], current_temperature, time_str)
+                            previous = board_processes[board["id"]]
+                            process, result_path = launch_board(board, previous, current_temperature, time_str)
                             board_processes[board["id"]] = process
+                            if result_path is not None and process is not None:
+                                started[board["id"]] = {
+                                    "process": process,
+                                    "result": result_path,
+                                    "line": None,
+                                }
                             if process is not None and process.poll() is None:
                                 status_parts.append(f"{board['id']}: running at {current_temperature}°C")
                             else:
                                 done = board_measurements[board["id"]]
                                 status_parts.append(f"{board['id']}: completed {done} at {current_temperature}°C")
                                 board_measurements[board["id"]] += 1
+                        if started:
+                            open_rounds.append(started)
                         status_line2 = " | ".join(status_parts) if status_parts else "No PYNQ-Z2 boards enabled"
                         last_pynq_sample_time = time.time() - start_time
                         lpwt_h , lpwt_rem = divmod(last_pynq_sample_time, 3600)

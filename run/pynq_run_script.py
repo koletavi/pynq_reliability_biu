@@ -45,7 +45,14 @@ def get_unique_output_path(base_output_path, suffix, temp, time_str):
         counter += 1
 
 
-def execute_notebook_and_copy(notebook_name, output_csv_name, ip, username, password, remote_notebook_dir, data_dir, temp, time_str):
+def notebook_failed(exit_status, output, errors):
+    """True when nbconvert failed or the notebook raised."""
+    if exit_status != 0:
+        return True
+    return "Traceback" in output or "Traceback" in errors
+
+
+def execute_notebook_and_copy(notebook_name, output_csv_name, ip, username, password, remote_notebook_dir, data_dir, temp, time_str, board_id):
     """Execute a Jupyter notebook on one PYNQ-Z2 via SSH and copy the updated CSV file with a unique name."""
     ssh = None
     scp = None
@@ -73,15 +80,16 @@ def execute_notebook_and_copy(notebook_name, output_csv_name, ip, username, pass
         )
         log(f"Executing {notebook_name}...")
         stdin, stdout, stderr = ssh.exec_command(command)
-        # Check for errors during execution
-        errors = stderr.read().decode()
-        output = stdout.read().decode()
-        if "Traceback" in errors or "Error" in errors or "failed" in errors.lower():
-            log(f"Errors during notebook execution: {errors}")
-            return False
-        else:
+        errors = stderr.read().decode(errors="replace")
+        output = stdout.read().decode(errors="replace")
+        exit_status = stdout.channel.recv_exit_status()
+        if notebook_failed(exit_status, output, errors):
+            log(f"{board_id}: {notebook_name} failed (exit {exit_status})")
             log(f"Notebook execution output: {output}")
             log(f"Notebook execution status (stderr): {errors}")
+            return False
+        log(f"Notebook execution output: {output}")
+        log(f"Notebook execution status (stderr): {errors}")
 
         # Poll for output file existence or update
         log(f"Waiting for output file {output_file} to be created or updated...")
@@ -95,7 +103,7 @@ def execute_notebook_and_copy(notebook_name, output_csv_name, ip, username, pass
                 break
             time.sleep(POLL_INTERVAL)
         else:
-            log(f"Timeout: Output file {output_file} not found or not updated after {POLL_TIMEOUT} seconds.")
+            log(f"{board_id}: {notebook_name} failed. Timeout: output file {output_file} not found or not updated after {POLL_TIMEOUT} seconds.")
             return False
 
         # Ensure output file is readable
@@ -113,7 +121,7 @@ def execute_notebook_and_copy(notebook_name, output_csv_name, ip, username, pass
         return True
 
     except Exception as e:
-        log(f"An error occurred: {str(e)}")
+        log(f"{board_id}: {notebook_name} failed. An error occurred: {str(e)}")
         return False
     finally:
         if scp is not None:
@@ -137,8 +145,17 @@ def parse_args():
     parser.add_argument("--temp", default="0", help="Temperature label stored in the CSV name")
     parser.add_argument("--time", default="0_0_0_time", dest="time_str", help="Stability-time label stored in the CSV name")
     parser.add_argument("--output-dir", default=None, help="Directory for this board's logs and CSVs")
+    parser.add_argument("--result-file", default=None, help="File that receives this round's csv count")
     parser.add_argument("--dry-run", action="store_true", help="Print the board IP and output directory without opening SSH")
     return parser.parse_args()
+
+
+def write_round_result(result_path, ok_count, total, failed_name):
+    """Tell process_main how many notebooks on this board copied a CSV."""
+    path = Path(result_path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    failed = failed_name or ""
+    path.write_text(f"ok={ok_count}\ntotal={total}\nfailed={failed}\n", encoding="utf-8")
 
 
 def main():
@@ -168,8 +185,12 @@ def main():
 
     os.makedirs(data_dir, exist_ok=True)
     os.makedirs(log_dir, exist_ok=True)
+    result_path = Path(args.result_file) if args.result_file else Path(output_dir) / "round_result.txt"
     log_path = get_unique_log_path(log_dir)
     log_file = open(log_path, "w", encoding="utf-8")
+    ok_count = 0
+    failed_name = ""
+    total = len(boards.NOTEBOOKS)
     try:
         for notebook, output_csv in boards.NOTEBOOKS:
             log(f"\n--- Running {notebook} on {board['id']} ({ip}) ---")
@@ -183,15 +204,21 @@ def main():
                 data_dir,
                 args.temp,
                 args.time_str,
+                board["id"],
             )
             if not success:
-                log(f"Failed to execute {notebook} or copy its output. Stopping sequence.")
+                failed_name = os.path.splitext(notebook)[0]
+                log(f"{board['id']}: {notebook} failed. Stopping this board. Other boards are not affected.")
                 break
+            ok_count += 1
         else:
             log("\nAll notebooks executed and output files copied successfully.")
     finally:
+        write_round_result(result_path, ok_count, total, failed_name)
         if log_file:
             log_file.close()
+    if failed_name:
+        sys.exit(1)
 
 
 if __name__ == "__main__":

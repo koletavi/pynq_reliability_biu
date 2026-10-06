@@ -24,3 +24,7 @@ time_list = [10, 60*1]
 # Example: 60*30  # 30 minutes
 pynq_wait_threshold = 60*10
 
+# oven_port: serial port of the Nova controller. Optional.
+# Leave this unset unless the TA tells you to change it. The default is COM4.
+# oven_port = "COM4"
+
