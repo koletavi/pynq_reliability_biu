@@ -1,11 +1,20 @@
 # this script should run the oven control system side and call the other script that handles the pynq side and live graphs
 
+import argparse
 import minimalmodbus
 import time
 import subprocess
 import os
+import sys
+from pathlib import Path
+
 import pandas as pd
 import matplotlib.pyplot as plt
+
+REPO_ROOT = Path(__file__).resolve().parents[1]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+import boards
 
 #--------------------------------#
 ######## Program Paramters #######
@@ -21,10 +30,10 @@ STOPBITS = 1
 TIMEOUT = 1
 SLAVE_ID = 1
 
-# Local output directory
-LOCAL_OUTPUT_DIR = r"C:\pynq\pynq_data" # FIXME if system set in another folder
-LOCAL_TEMP_DIR = os.path.join(LOCAL_OUTPUT_DIR, "temperature_data")  # Path to the temperature data CSV file
-PYNQ_RUN_SCRIPT =  r"C:\pynq\pynq_codes\pynq_run_script.py"  # Path to the script that runs on the PYNQ-Z2 FIXME if set in another folder
+# One shared oven log. Each PYNQ-Z2 writes under data/boards/<board id>/.
+LOCAL_OUTPUT_DIR = boards.OUTPUT_ROOT
+LOCAL_TEMP_DIR = boards.TEMPERATURE_DIR
+PYNQ_RUN_SCRIPT = Path(__file__).resolve().parent / "pynq_run_script.py"
 
 # List of registers to read (from d_reg_minimal_file.xlsx)
 REGISTERS = [
@@ -354,24 +363,70 @@ def monitor_print(line0="", line1="", line2="", line3=""):
 ##### PYNQ-Z2 Execution Functions #####
 #-------------------------------------#
 
-# Execute the PYNQ-Z2 notebook externally using a subprocess. - 0 seconds wait
-def execute_notebook_externally(previous_process=None, temp=lc, time_str=""):
+def parse_args():
+    parser = argparse.ArgumentParser(description="Oven control and parallel PYNQ-Z2 sampling")
+    parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Create output directories and print the board plan without connecting",
+    )
+    return parser.parse_args()
+
+
+def prepare_output_dirs():
+    """Create the shared temperature folder and one result folder per enabled board."""
+    LOCAL_TEMP_DIR.mkdir(parents=True, exist_ok=True)
+    for board in boards.enabled_boards():
+        board_dir = boards.board_output_dir(board["id"])
+        (board_dir / "pynq_run_data").mkdir(parents=True, exist_ok=True)
+        (board_dir / "logs").mkdir(parents=True, exist_ok=True)
+
+
+def print_board_plan():
+    print("Enabled PYNQ-Z2 boards:")
+    enabled = boards.enabled_boards()
+    if not enabled:
+        print("  (none)")
+    for board in enabled:
+        print(f"  {board['id']}  {board['ip']}  ->  {boards.board_output_dir(board['id'])}")
+    disabled = [board for board in boards.BOARDS if not board.get("enabled", True)]
+    if disabled:
+        print("Disabled boards (skipped):")
+        for board in disabled:
+            print(f"  {board['id']}  {board['ip']}")
+    print(f"Temperature logs: {LOCAL_TEMP_DIR}")
+
+
+# Start one board's measurement if that board is not already running. - 0 seconds wait
+def launch_board(board, previous_process=None, temp=lc, time_str=""):
     try:
-        if previous_process is not None:
-            # Check if the previous process is still running
-            pynq_state = previous_process.poll()
-            if pynq_state is None:
-                return previous_process
-        pynq_process = subprocess.Popen(["python", PYNQ_RUN_SCRIPT, str(temp), time_str], shell=False)
-        return pynq_process  # Start a new process to run the PYNQ-Z2 script
+        if previous_process is not None and previous_process.poll() is None:
+            return previous_process
+        command = [
+            sys.executable,
+            str(PYNQ_RUN_SCRIPT),
+            "--board", board["id"],
+            "--ip", board["ip"],
+            "--temp", str(temp),
+            "--time", time_str,
+            "--output-dir", str(boards.board_output_dir(board["id"])),
+        ]
+        return subprocess.Popen(command, shell=False)
     except Exception as e:
-        print(f"\nError executing PYNQ-Z2 script: {e}")
+        print(f"\nError executing PYNQ-Z2 script for {board['id']}: {e}")
         return None
 
 
 
 
 def main():
+    args = parse_args()
+    prepare_output_dirs()
+    if args.dry_run:
+        print_board_plan()
+        print("Dry run only. No oven or board connection was opened.")
+        return
+
     try:
         print("=== Starting Temperature Control and Data Collection ===\n")
         #----------------------------------------#
@@ -407,8 +462,9 @@ def main():
         completed_temperatures = set()  # List to keep track of completed temperatures  
         stable_flag = False  # Flag to indicate if the process has been stable until now
 
-        pynq_process = None  # Initialize PYNQ-Z2 process variable
-        measurement_number = 0  # Initialize measurement number
+        active_boards = boards.enabled_boards()
+        board_processes = {board["id"]: None for board in active_boards}
+        board_measurements = {board["id"]: 0 for board in active_boards}
 
         # Initialize status lines
         status_line0 = ""  # Line for current values
@@ -449,22 +505,25 @@ def main():
                 minutes, seconds = divmod(rem, 60)
                 status_line1 = f"Process is stable for {int(hours):02d}:{int(minutes):02d}:{seconds:04.2f} since {int(sst_hours):02d}:{int(sst_minutes):02d}:{sst_seconds:04.2f}"
                 time_str = f"{int(hours)}_{int(minutes)}_{int(seconds)}_time"
-                # Trigger PYNQ-Z2 if stable time exceeds threshold
+                # Trigger every idle PYNQ-Z2 together if stable time exceeds threshold
                 if stable_time >= stability_threshold:
                     if not pynq_waiting:
-                        pynq_process = execute_notebook_externally(pynq_process, current_temperature, time_str)
+                        status_parts = []
+                        for board in active_boards:
+                            process = launch_board(board, board_processes[board["id"]], current_temperature, time_str)
+                            board_processes[board["id"]] = process
+                            if process is not None and process.poll() is None:
+                                status_parts.append(f"{board['id']}: running at {current_temperature}°C")
+                            else:
+                                done = board_measurements[board["id"]]
+                                status_parts.append(f"{board['id']}: completed {done} at {current_temperature}°C")
+                                board_measurements[board["id"]] += 1
+                        status_line2 = " | ".join(status_parts) if status_parts else "No PYNQ-Z2 boards enabled"
                         last_pynq_sample_time = time.time() - start_time
                         lpwt_h , lpwt_rem = divmod(last_pynq_sample_time, 3600)
                         lpwt_m , lpwt_s = divmod(lpwt_rem, 60)
-
-                        # Update PYNQ-Z2 status line
-                        if pynq_process is not None and pynq_process.poll() is None:
-                            status_line2 = f"PYNQ-Z2 script is currently running at {current_temperature}°C."
-                        else:
-                            status_line2 = f"PYNQ-Z2 script has completed {measurement_number} times at {current_temperature}°C."
-                            measurement_number += 1
                     else:
-                        status_line2 = "PYNQ-Z2 is waiting"
+                        status_line2 = "PYNQ-Z2 boards are waiting"
    
             else:
                 stable_flag = False

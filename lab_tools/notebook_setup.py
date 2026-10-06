@@ -1,28 +1,31 @@
-import paramiko
-import time
+import argparse
 import os
 import sys
 from pathlib import Path
 
-# Configuration
-PYNQ_IP = "169.254.226.99"
-USERNAME = "xilinx"
-PASSWORD = "xilinx"  # Replace with your actual password or use SSH key
-SETUP_NOTE = "rofc_setup.ipynb"
-REMOTE_NOTEBOOK_DIR = "/home/xilinx/jupyter_notebooks/rofc/"
-LOCAL_OUTPUT_DIR = r"C:\pynq\pynq_data"
+import paramiko
 
-def execute_setup_notebook(notebook_name):
-    """Execute a Jupyter notebook on PYNQ-Z2 via SSH and copy the updated CSV file with a unique name."""
+REPO_ROOT = Path(__file__).resolve().parents[1]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+import boards
+
+SETUP_NOTE = "rofc_setup.ipynb"
+
+def execute_setup_notebook(notebook_name, board):
+    """Execute the setup notebook on one PYNQ-Z2 via SSH."""
     ssh = None
     scp = None
     try:
         # Initialize SSH client
         ssh = paramiko.SSHClient()
         ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
-        ssh.connect(PYNQ_IP, username=USERNAME, password=PASSWORD)
+        username = board.get("username", boards.USERNAME)
+        password = board.get("password", boards.PASSWORD)
+        remote_notebook_dir = board.get("remote_notebook_dir", boards.REMOTE_NOTEBOOK_DIR)
+        ssh.connect(board["ip"], username=username, password=password)
 
-        notebook_path = REMOTE_NOTEBOOK_DIR + notebook_name 
+        notebook_path = remote_notebook_dir + notebook_name 
 
         # Command to activate virtual environment and execute notebook
         command = (
@@ -60,17 +63,27 @@ def execute_setup_notebook(notebook_name):
                 pass
 
 def main():
-    global log_file
-    os.makedirs(LOCAL_OUTPUT_DIR, exist_ok=True)
+    parser = argparse.ArgumentParser(description="Run the remote setup notebook on one or every enabled PYNQ-Z2.")
+    parser.add_argument("--board", default=None, help="Board id. Defaults to every enabled board, one after another.")
+    args = parser.parse_args()
+    if args.board:
+        selected = [boards.board_by_id(args.board)]
+    else:
+        selected = boards.enabled_boards()
+    if not selected:
+        print("No enabled boards in boards.py")
+        return
+
+    os.makedirs(boards.OUTPUT_ROOT, exist_ok=True)
     try:
-        notebook = SETUP_NOTE
-        print(f"\n--- Running {notebook} ---")
-        success = execute_setup_notebook(notebook)
-        if not success:
-            print(f"Failed to execute {notebook} or copy its output. Stopping sequence.")
-        
+        for board in selected:
+            print(f"\n--- {board['id']} ({board['ip']}) running {SETUP_NOTE} ---")
+            success = execute_setup_notebook(SETUP_NOTE, board)
+            if not success:
+                print(f"Failed to execute {SETUP_NOTE} on {board['id']}. Stopping sequence.")
+                break
         else:
-            print("\nAll notebooks executed and output files copied successfully.")
+            print("\nSetup notebook finished on every selected board.")
     except Exception as e:
         print(f"got exception: {e}")
 

@@ -1,36 +1,30 @@
-import paramiko
-import time
+import argparse
 import os
 import sys
+import time
 from pathlib import Path
 
-# Check if a temperature and time arguments are provided, otherwise use default
-if len(sys.argv) > 1:
-    # If a temperature and time argument are provided, use them
-    TEMP = sys.argv[1]
-    TIME = sys.argv[2]
-else:
-    # If no argument is provided, use a default value
-    TEMP = "0"
-    TIME = "0_0_0_time"
-# Configuration
-PYNQ_IP = "169.254.168.99"
-USERNAME = "xilinx"
-PASSWORD = "xilinx"  # Replace with your actual password or use SSH key
-NOTEBOOKS = [
-    ("rofc_11.ipynb", "output_data_11.csv"),
-    ("rofc_21.ipynb", "output_data_21.csv"),
-    ("rofc_51.ipynb", "output_data_51.csv"),
-]
-REMOTE_NOTEBOOK_DIR = "/home/xilinx/jupyter_notebooks/rofc/"
-LOCAL_OUTPUT_DIR = r"C:\pynq\pynq_data"
-LOG_DIR = os.path.join(LOCAL_OUTPUT_DIR, "logs")
-LOCAL_PYNQ_DATA_DIR = os.path.join(LOCAL_OUTPUT_DIR, "pynq_run_data")
-POLL_TIMEOUT = 5*60  # Maximum seconds to wait for output file
+import paramiko
+
+REPO_ROOT = Path(__file__).resolve().parents[1]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+import boards
+
+POLL_TIMEOUT = 5 * 60  # Maximum seconds to wait for output file
 POLL_INTERVAL = 1  # Seconds between file existence checks
 
-def get_unique_log_path():
-    base_name = os.path.join(LOG_DIR, "pynq_run_")
+log_file = None
+
+
+def log(msg):
+    if log_file:
+        log_file.write(str(msg) + "\n")
+        log_file.flush()
+
+
+def get_unique_log_path(log_dir):
+    base_name = os.path.join(log_dir, "pynq_run_")
     counter = 0
     while True:
         log_path = f"{base_name}{counter}.log"
@@ -38,38 +32,33 @@ def get_unique_log_path():
             return log_path
         counter += 1
 
-log_file = None
 
-def log(msg):
-    if log_file:
-        log_file.write(str(msg) + "\n")
-        log_file.flush()
-
-def get_unique_output_path(base_output_path, suffix):
+def get_unique_output_path(base_output_path, suffix, temp, time_str):
     """Generate a unique output file path with an incrementing number."""
     base_name = os.path.splitext(base_output_path)[0]
     log(f"Base output path: {base_name}")
     counter = 0
     while True:
-        new_path = f"{base_name}_{TEMP}C_{TIME}_{counter}{suffix}"
+        new_path = f"{base_name}_{temp}C_{time_str}_{counter}{suffix}"
         if not os.path.exists(new_path):
             return new_path
         counter += 1
 
-def execute_notebook_and_copy(notebook_name, output_csv_name):
-    """Execute a Jupyter notebook on PYNQ-Z2 via SSH and copy the updated CSV file with a unique name."""
+
+def execute_notebook_and_copy(notebook_name, output_csv_name, ip, username, password, remote_notebook_dir, data_dir, temp, time_str):
+    """Execute a Jupyter notebook on one PYNQ-Z2 via SSH and copy the updated CSV file with a unique name."""
     ssh = None
     scp = None
     try:
         # Initialize SSH client
         ssh = paramiko.SSHClient()
         ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
-        ssh.connect(PYNQ_IP, username=USERNAME, password=PASSWORD)
+        ssh.connect(ip, username=username, password=password)
 
-        notebook_path = REMOTE_NOTEBOOK_DIR + notebook_name 
-        output_file = REMOTE_NOTEBOOK_DIR + output_csv_name
-        local_output_base = os.path.join(LOCAL_PYNQ_DATA_DIR, output_csv_name)
-        local_output_path = get_unique_output_path(local_output_base, ".csv")
+        notebook_path = remote_notebook_dir + notebook_name
+        output_file = remote_notebook_dir + output_csv_name
+        local_output_base = os.path.join(data_dir, output_csv_name)
+        local_output_path = get_unique_output_path(local_output_base, ".csv", temp, time_str)
 
         # Get initial modification time of the output file (if it exists)
         check_file_command = f"stat -c %Y {output_file} || echo '0'"
@@ -117,7 +106,7 @@ def execute_notebook_and_copy(notebook_name, output_csv_name):
         # Copy the output file using SCP with unique name
         log(f"Copying output file to {local_output_path}...")
         scp = ssh.open_sftp()
-        os.makedirs(LOCAL_PYNQ_DATA_DIR, exist_ok=True)
+        os.makedirs(data_dir, exist_ok=True)
         scp.get(output_file, local_output_path)
         log(f"Output file copied to {local_output_path}")
 
@@ -138,15 +127,63 @@ def execute_notebook_and_copy(notebook_name, output_csv_name):
             except Exception:
                 pass
 
+
+def parse_args():
+    parser = argparse.ArgumentParser(
+        description="Run the RO frequency notebooks on one PYNQ-Z2 and copy the CSVs back."
+    )
+    parser.add_argument("--board", required=True, help="Board id from boards.py, for example board_01")
+    parser.add_argument("--ip", default=None, help="Override the board IP from boards.py")
+    parser.add_argument("--temp", default="0", help="Temperature label stored in the CSV name")
+    parser.add_argument("--time", default="0_0_0_time", dest="time_str", help="Stability-time label stored in the CSV name")
+    parser.add_argument("--output-dir", default=None, help="Directory for this board's logs and CSVs")
+    parser.add_argument("--dry-run", action="store_true", help="Print the board IP and output directory without opening SSH")
+    return parser.parse_args()
+
+
 def main():
     global log_file
-    os.makedirs(LOCAL_PYNQ_DATA_DIR, exist_ok=True)
-    log_path = get_unique_log_path()
+    args = parse_args()
+    try:
+        board = boards.board_by_id(args.board)
+    except KeyError as exc:
+        print(exc)
+        sys.exit(2)
+
+    ip = args.ip or board["ip"]
+    username = board.get("username", boards.USERNAME)
+    password = board.get("password", boards.PASSWORD)
+    remote_notebook_dir = board.get("remote_notebook_dir", boards.REMOTE_NOTEBOOK_DIR)
+    output_dir = Path(args.output_dir) if args.output_dir else boards.board_output_dir(board["id"])
+    data_dir = os.path.join(output_dir, "pynq_run_data")
+    log_dir = os.path.join(output_dir, "logs")
+
+    if args.dry_run:
+        print(f"Board: {board['id']}")
+        print(f"IP: {ip}")
+        print(f"Output directory: {output_dir}")
+        print("Notebooks: " + ", ".join(name for name, _csv in boards.NOTEBOOKS))
+        print("Dry run only. No SSH connection was opened.")
+        return
+
+    os.makedirs(data_dir, exist_ok=True)
+    os.makedirs(log_dir, exist_ok=True)
+    log_path = get_unique_log_path(log_dir)
     log_file = open(log_path, "w", encoding="utf-8")
     try:
-        for notebook, output_csv in NOTEBOOKS:
-            log(f"\n--- Running {notebook} ---")
-            success = execute_notebook_and_copy(notebook, output_csv)
+        for notebook, output_csv in boards.NOTEBOOKS:
+            log(f"\n--- Running {notebook} on {board['id']} ({ip}) ---")
+            success = execute_notebook_and_copy(
+                notebook,
+                output_csv,
+                ip,
+                username,
+                password,
+                remote_notebook_dir,
+                data_dir,
+                args.temp,
+                args.time_str,
+            )
             if not success:
                 log(f"Failed to execute {notebook} or copy its output. Stopping sequence.")
                 break
@@ -155,6 +192,7 @@ def main():
     finally:
         if log_file:
             log_file.close()
+
 
 if __name__ == "__main__":
     main()

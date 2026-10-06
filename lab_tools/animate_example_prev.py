@@ -1,14 +1,23 @@
+import sys
+from pathlib import Path
+
 import pandas as pd
 import matplotlib.pyplot as plt
 from matplotlib.animation import FuncAnimation
-import sys
+
+REPO_ROOT = Path(__file__).resolve().parents[1]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+import boards
 
 plt.style.use('fivethirtyeight')
+
+LIVE_TEMPERATURE_FILE = boards.TEMPERATURE_DIR / "live_temperature_data.csv"
 
 def animate(i):
     try:
         # Read the CSV file
-        data = pd.read_csv(r"C:\pynq\pynq_data\temperature_data\live_temperature_data.csv")
+        data = pd.read_csv(LIVE_TEMPERATURE_FILE)
         # Extract x and y data
         x = data['time']
         y = data['Temperature']

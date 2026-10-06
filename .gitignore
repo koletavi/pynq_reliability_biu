@@ -1,6 +1,12 @@
 # Ignore PYNQ data directory
 pynq_data/
 
+# Experiment output (temperature logs and per-board CSVs)
+data/
+
+# Grok Build local state
+.grok/
+
 # Ignore zip files
 *.zip
 

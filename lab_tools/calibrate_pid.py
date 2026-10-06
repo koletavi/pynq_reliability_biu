@@ -1,5 +1,13 @@
+import sys
+from pathlib import Path
+
 import minimalmodbus
 import time
+
+REPO_ROOT = Path(__file__).resolve().parents[1]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+import boards
 
 # Nova SP540 Communication settings
 PORT = 'COM4'
@@ -10,7 +18,7 @@ TIMEOUT = 1
 SLAVE_ID = 1
 
 # Local output directory
-LOCAL_OUTPUT_DIR = r"C:\pynq\pynq_data"
+LOCAL_OUTPUT_DIR = str(boards.OUTPUT_ROOT)
 
 # List of registers to read (from d_reg_minimal_file.xlsx)
 REGISTERS = [

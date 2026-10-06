@@ -1,8 +1,16 @@
+import sys
+from pathlib import Path
+
 import pandas as pd
 import matplotlib.pyplot as plt
 
-# Path to the CSV file
-temperature_file = r"C:\pynq\pynq_data\8_6_25_temp_vs_time.csv"
+REPO_ROOT = Path(__file__).resolve().parents[1]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+import boards
+
+# Path to the CSV file written by run/process_main.py
+temperature_file = boards.TEMPERATURE_DIR / "temperature_data.csv"
 
 print("\n\nMeasurement sequence complete or terminated.")
 temp_data_file = pd.read_csv(temperature_file)

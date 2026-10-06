@@ -1,22 +1,33 @@
+import sys
+from pathlib import Path
+
 import minimalmodbus
 import time
 import csv
 import logging
 from datetime import datetime
 
+REPO_ROOT = Path(__file__).resolve().parents[1]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+import boards
+
+OVEN_READ_DIR = boards.OVEN_READ_DIR
+OVEN_READ_DIR.mkdir(parents=True, exist_ok=True)
+
 # Set up logging
 logging.basicConfig(
     level=logging.INFO,
-    format='%(asctime)s - %(levelname)s - %(message)s',
+    format='%(asctime)s - %(levelname)s -\n%(message)s',
     handlers=[
-        logging.FileHandler('C:/pynq/tests/nova_register_read.log'),
+        logging.FileHandler(OVEN_READ_DIR / "nova_register_read.log"),
         logging.StreamHandler()
     ]
 )
 logger = logging.getLogger(__name__)
 
 # Communication settings
-PORT = 'COM5'
+PORT = 'COM4'
 BAUDRATE = 9600
 PARITY = 'N'
 STOPBITS = 1
@@ -31,15 +42,15 @@ REGISTERS = [
     (31, "LINK.CODE"), (32, "RPT"), (33, "RST"), (34, "REN"), (36, "WAIT.TIME"),
     (111, "F.KEY,RST/P1/P2"), (112, "HOLD,OFF/ON"), (113, "STEP,OFF/ON"),
     (121, "AT"), (122, "AT-G"), (133, "PE-TM"), (135, "US1"), (136, "US2"),
-    (137, "LOCK"), (138, "DI.SL"), (139, "DSP.H"), (140, "DSP.L"),
-    (205, "HOLD SP"), (206, "HOLD TIME"), (301, "1.IST"), (302, "1.ISB"),
-    (303, "1.ISH"), (304, "1.ISL"), (305, "1.ISD"), (306, "2.IST"),
-    (307, "2.ISB"), (308, "2.ISH"), (309, "2.ISL"), (310, "2.ISD"),
-    (311, "DO1"), (312, "DO2"), (313, "DO3"), (314, "DO4"), (401, "ALT1"),
-    (402, "ALT2"), (403, "ALT3"), (406, "AL-1"), (407, "AL-2"), (408, "AL-3"),
-    (411, "A1DB"), (412, "A2DB"), (413, "A3DB"), (416, "A1DY"), (417, "A2DY"),
-    (418, "A3DY"), (421, "AL1.H"), (422, "AL2.H"), (423, "AL3.H"),
-    (426, "AL1.L"), (427, "AL2.L"), (428, "AL3.L"), (501, "ARW"), (502, "FUZZY"),
+    (137, "LOCK"), (138, "DI.SL"), (139, "DSP.H"), (140, "DSP.L"), 
+    (205, "HOLD SP"), (206, "HOLD TIME"), (301, "1.IST"), (302, "1.ISB"), 
+    (303, "1.ISH"), (304, "1.ISL"), (305, "1.ISD"), (306, "2.IST"), 
+    (307, "2.ISB"), (308, "2.ISH"), (309, "2.ISL"), (310, "2.ISD"), 
+    (311, "DO1"), (312, "DO2"), (313, "DO3"), (314, "DO4"), (401, "ALT1"), 
+    (402, "ALT2"), (403, "ALT3"), (406, "AL-1"), (407, "AL-2"), (408, "AL-3 "),
+    (411, "A1DB"), (412, "A2DB"), (413, "A3DB"), (416, "A1DY"), (417, "A2DY "),
+    (418, "A3DY"), (421, "AL1.H"), (422, "AL2.H"), (423, "AL3.H"), 
+    (426, "AL1.L"), (427, "AL2.L"), (428, "AL3.L"), (501, "ARW"), (502, "FU ZZY"),
     (503, "C.MOD"), (511, "1.P"), (512, "1.I"), (513, "1.D"), (514, "1.MR"),
     (519, "RP1"), (521, "2.P"), (522, "2.I"), (523, "2.D"), (524, "2.MR"),
     (529, "RP2"), (531, "3.P"), (532, "3.I"), (533, "3.D"), (534, "3.MR"),
@@ -80,6 +91,7 @@ REGISTERS = [
     (1248, "2.TSF"), (1251, "2.RPT"), (1252, "2.RST"), (1253, "2.REN")
 ]
 
+# TRUSTED 
 def initialize_instrument():
     """Initialize the Modbus instrument with the specified communication settings."""
     try:
@@ -95,12 +107,13 @@ def initialize_instrument():
         logger.error(f"Failed to initialize Modbus instrument: {e}")
         raise
 
+# TRUSTED 
 def read_register(instrument, register, name):
     """Read a single register and return its value or None if it fails."""
     try:
         # Adjust register number to Modbus address (D-Register 1 = Modbus address 0)
         value = instrument.read_register(register - 1, functioncode=3)
-        logger.info(f"Read register {register} ({name}): {value}")
+        # logger.info(f"Read register {register} ({name}): {value}")
         return value
     except minimalmodbus.ModbusException as e:
         logger.warning(f"Failed to read register {register} ({name}): {e}")
@@ -109,11 +122,40 @@ def read_register(instrument, register, name):
         logger.error(f"Unexpected error reading register {register} ({name}): {e}")
         return None
 
+
+# Matrix dimensions
+COLUMNS = 5
+ROWS = (len(REGISTERS) + COLUMNS - 1) // COLUMNS  # 208 ÷ 5 ≈ 42 rows
+
+# Function to build the matrix - builds before print
+def build_matrix(register_values):
+    matrix_lines = []
+    for row in range(ROWS):
+        matrix_row = []
+        for col in range(COLUMNS):
+            index = row * COLUMNS + col
+            if index < len(REGISTERS):
+                reg_index, reg_name = REGISTERS[index]
+                if len(reg_name) > 7:
+                    if register_values[reg_index] <= 1000:
+                        cell = f"{reg_index}:\t{reg_name}\t{register_values[reg_index]:6d}"
+                    else:
+                        cell = f"{reg_index}:\t{reg_name}{register_values[reg_index]:6d}"
+                else:
+                    cell = f"{reg_index}:\t{reg_name}\t\t{register_values[reg_index]:6d}"
+                matrix_row.append(cell)
+            else:
+                matrix_row.append("")
+        matrix_lines.append(" | ".join(matrix_row).rstrip())
+    return "\n".join(matrix_lines)
+
+
+
 def main():
     """Read all defined registers and save to a CSV file."""
     # Initialize instrument
     try:
-        instrument = initialize_instrument()
+        instrument = initialize_instrument() # WORKS FINE
     except Exception as e:
         logger.error("Exiting due to initialization failure.")
         return
@@ -121,10 +163,10 @@ def main():
     # Store results
     results = []
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    output_file = f"C:/pynq/tests/nova_register_values_{timestamp}.csv"
+    output_file = OVEN_READ_DIR / f"nova_register_values_{timestamp}.csv"
 
     # Read each register
-    for register, name in REGISTERS:
+    for register , name in REGISTERS:
         value = read_register(instrument, register, name)
         results.append({
             "Register": register,
@@ -133,7 +175,14 @@ def main():
         })
         # Small delay to prevent overwhelming the controller
         time.sleep(0.05)
+        
+    register_values = {item["Register"]: item["Value"] for item in results if item["Value"] != "N/A"}
+    initial_output = build_matrix(register_values)
+    logging.info("\n")
+    logging.info(initial_output + "\n")
+    # time.sleep(0.5)
 
+    
     # Save to CSV
     try:
         with open(output_file, mode='w', newline='', encoding='utf-8') as file:
