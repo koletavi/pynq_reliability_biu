@@ -11,8 +11,6 @@ from pathlib import Path
 minimalmodbus = None
 pd = None
 plt = None
-_VT_ENABLED = False
-_last_plain_status_time = 0.0
 
 
 def load_run_packages():
@@ -278,48 +276,7 @@ def append_to_csv(filename, time_column, value_column, time_value, value, live=F
     df.to_csv(filename, index=False)
 
 # monitor print function - 0 seconds wait
-def enable_virtual_terminal():
-    """Enable ANSI cursor controls on Windows consoles when supported."""
-    if os.name != "nt":
-        return sys.stdout.isatty()
-
-    try:
-        import ctypes
-        from ctypes import wintypes
-
-        kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
-        kernel32.GetStdHandle.argtypes = [wintypes.DWORD]
-        kernel32.GetStdHandle.restype = wintypes.HANDLE
-        kernel32.GetConsoleMode.argtypes = [wintypes.HANDLE, ctypes.POINTER(wintypes.DWORD)]
-        kernel32.GetConsoleMode.restype = wintypes.BOOL
-        kernel32.SetConsoleMode.argtypes = [wintypes.HANDLE, wintypes.DWORD]
-        kernel32.SetConsoleMode.restype = wintypes.BOOL
-
-        stdout_handle = kernel32.GetStdHandle(0xFFFFFFF5)
-        if not stdout_handle or stdout_handle == wintypes.HANDLE(-1).value:
-            return False
-
-        mode = wintypes.DWORD()
-        if not kernel32.GetConsoleMode(stdout_handle, ctypes.byref(mode)):
-            return False
-        return bool(kernel32.SetConsoleMode(stdout_handle, mode.value | 0x0004))
-    except (AttributeError, OSError):
-        return False
-
-
 def monitor_print(line0="", line1="", line2="", line3=""):
-    global _last_plain_status_time
-
-    if not _VT_ENABLED:
-        now = time.monotonic()
-        if now - _last_plain_status_time < 30:
-            return
-        _last_plain_status_time = now
-        for line in (line0, line1, line2, line3):
-            if line:
-                print(line)
-        return
-
     # Move to status line 0 (first display line)
     print("\033[1E\033[2K", end="", flush=True)  # Move down 1 line, clear it
     print(line0, end="", flush=True)  # Print Values status
@@ -386,9 +343,6 @@ def print_round_summary(line):
     The status block redraws the few lines under the cursor. Inserting the
     summary above that block keeps it on screen.
     """
-    if not _VT_ENABLED:
-        print(line)
-        return
     sys.stdout.write("\033[L" + line + "\033[1E")
     sys.stdout.flush()
 
@@ -492,10 +446,6 @@ def main():
     if preflight.run_checks(PORT) != 0:
         sys.exit(1)
     load_run_packages()
-    global _VT_ENABLED
-    _VT_ENABLED = enable_virtual_terminal()
-    if not _VT_ENABLED:
-        print("Console cursor updates are unavailable; plain status snapshots will print every 30 seconds.")
     prepare_output_dirs()
 
     try:
