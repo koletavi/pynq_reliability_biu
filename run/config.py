@@ -1,5 +1,5 @@
-# Configuration overrides for process_main.py
-# Edit the values below to change the oven process behavior.
+# Edit only this file. The oven run and the board-only run read it at start.
+# Invalid values stop the program before the oven is touched.
 
 # temperature_list: list of setpoint temperatures in degrees Celsius.
 # Example: [80, 90, 100, 110]

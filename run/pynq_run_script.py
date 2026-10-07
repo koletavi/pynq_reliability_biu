@@ -46,10 +46,18 @@ def get_unique_output_path(base_output_path, suffix, temp, time_str):
 
 
 def notebook_failed(exit_status, output, errors):
-    """True when nbconvert failed or the notebook raised."""
+    """True when nbconvert exits non-zero or the notebook output contains Traceback.
+
+    A good nbconvert run still writes words such as "failed" and "Error" to
+    stderr. Those words are not a failed notebook.
+    """
     if exit_status != 0:
         return True
-    return "Traceback" in output or "Traceback" in errors
+    if output and "Traceback" in output:
+        return True
+    if errors and "Traceback" in errors:
+        return True
+    return False
 
 
 def execute_notebook_and_copy(notebook_name, output_csv_name, ip, username, password, remote_notebook_dir, data_dir, temp, time_str, board_id):
@@ -150,8 +158,30 @@ def parse_args():
     return parser.parse_args()
 
 
+def format_round_line(board_id, result_path, return_code=None):
+    """One summary line. A failed notebook is never reported as a full success."""
+    total = len(boards.NOTEBOOKS)
+    path = Path(result_path) if result_path is not None else None
+    if path is None or not path.is_file():
+        return f"{board_id}: 0/{total} csv (no result)"
+    data = {}
+    for line in path.read_text(encoding="utf-8").splitlines():
+        if "=" not in line:
+            continue
+        key, value = line.split("=", 1)
+        data[key.strip()] = value.strip()
+    ok = data.get("ok", "0")
+    reported_total = data.get("total", str(total))
+    failed = data.get("failed", "")
+    if failed:
+        return f"{board_id}: {ok}/{reported_total} csv ({failed} failed)"
+    if return_code not in (None, 0):
+        return f"{board_id}: {ok}/{reported_total} csv (notebook failed)"
+    return f"{board_id}: {ok}/{reported_total} csv"
+
+
 def write_round_result(result_path, ok_count, total, failed_name):
-    """Tell process_main how many notebooks on this board copied a CSV."""
+    """Record how many notebooks on this board copied a CSV."""
     path = Path(result_path)
     path.parent.mkdir(parents=True, exist_ok=True)
     failed = failed_name or ""
@@ -188,6 +218,7 @@ def main():
     result_path = Path(args.result_file) if args.result_file else Path(output_dir) / "round_result.txt"
     log_path = get_unique_log_path(log_dir)
     log_file = open(log_path, "w", encoding="utf-8")
+    log(f"board_id={board['id']}")
     ok_count = 0
     failed_name = ""
     total = len(boards.NOTEBOOKS)

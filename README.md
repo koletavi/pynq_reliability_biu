@@ -1,34 +1,39 @@
 # PYNQ reliability run (university branch)
 
-One oven heats the boards. Two PYNQ-Z2 boards measure at each stable temperature. Students do only the steps in "What you do". Everything else is for the TA.
+One oven heats the boards. The lab account measures `board_01` and leaves that window open. Group B later uses the same PC and measures `board_02` only, while that oven run is still going. Group B does not start a second oven program. Both groups share the current oven temperature. Their result folders do not overlap.
+
+Students do only the steps in "What you do". Everything else is for the TA.
 
 ## What you do
 
-1. Edit only `run/config.py` if the TA gave you different temperatures or times. If you were not told to change it, leave it as it is.
-2. Double-click `check_lab.bat`, or from this folder run:
+Edit only `run/config.py`. If the TA did not give you different temperatures or times, leave it as it is.
+
+### Lab account
+
+1. Double-click `check_oven.bat`.
+2. Wait until the window says `OK`. If it says `FAIL`, stop. Read the sentence above `FAIL` and call the TA. Do not start the oven.
+3. Double-click `oven_board_01.bat` and leave that window open for the whole run.
+
+`check_oven.bat` does not start the oven. `oven_board_01.bat` programs the oven and measures `board_01` only.
+
+### Group B
+
+1. Do not run `oven_board_01.bat`. The oven is already running.
+2. Double-click `check_board_02.bat`.
+3. Wait until the window says `OK`. If it says `FAIL`, stop. Read the sentence above `FAIL` and call the TA.
+4. Double-click `board_02_only.bat` and leave that window open.
+
+`check_board_02.bat` does not open the oven port. `board_02_only.bat` measures `board_02` only. It does not start an oven program.
+
+Stop a job with Ctrl+C in its own window. That stops only that window. The other group's window keeps running.
+
+After each measurement round the window prints one summary line, for example:
 
 ```text
-check_lab.bat
+board_01: 3/3 csv
 ```
 
-3. Wait until the window says `OK`. If it says `FAIL`, stop. Do not start the run. Read the sentence above `FAIL` and call the TA.
-4. Double-click `run_lab.bat`, or run:
-
-```text
-run_lab.bat
-```
-
-5. Leave that window open. Stop the run with Ctrl+C. At the end it shows a plot of oven temperature versus time.
-
-`check_lab.bat` only checks the PC, the oven port, and the boards. It does not heat the oven and it does not measure. `run_lab.bat` runs that same check again and then starts the experiment. If the check fails, the oven is not started.
-
-After each measurement round the run prints one line, for example:
-
-```text
-board_01: 3/3 csv, board_02: 2/3 csv (rofc_51 failed)
-```
-
-That means board 1 copied three files and board 2 copied two. A failure on one board does not stop the other board.
+A notebook that fails is not counted as a success. The line then names the notebook, for example `board_01: 2/3 csv (rofc_51 failed)`.
 
 ## What you are allowed to change
 
@@ -44,41 +49,31 @@ Edit **only** `run/config.py`. The program reads that file when it starts and st
 
 The checked-in file runs only the first setpoint (80°C), with a 10 minute rise, a 60 minute hold, and 10 minutes between measurement rounds.
 
-Do not edit `boards.py`, `run/process_main.py`, or the files in `lab_tools/`.
+## What the runs do
 
-## What the run does
+The lab account's window prints `Oven port: COMx`, programs the oven, and starts the temperature profile. It records the oven temperature about once a second. A setpoint counts as stable only after the measured temperature has stayed within 5°C of the setpoint for 2 minutes. Those two limits are fixed. They are not in `run/config.py`. When the temperature is stable, that window measures `board_01` at `169.254.168.99`. It does not start `board_02`.
 
-There is one oven and two boards. The boards do not heat anything. They measure while the oven holds a temperature.
+Group B's window does not wait for oven stability and does not write the temperature program. It measures `board_02` at `169.254.168.100`, waits `pynq_wait_threshold` seconds, and measures again until Ctrl+C.
 
-1. The program prints `Oven port: COMx`, programs the oven, and starts the temperature profile.
-2. It records the oven temperature about once a second.
-3. A setpoint counts as stable only after the measured temperature has stayed within 5°C of the setpoint for 2 minutes. Those two limits are fixed. They are not in `run/config.py`.
-4. When the temperature is stable, both boards start together:
-   - `board_01` at `169.254.168.99`
-   - `board_02` at `169.254.168.100`
-5. Each board then runs three notebooks that are already on that board, one after another:
-   1. `rofc_11.ipynb`
-   2. `rofc_21.ipynb`
-   3. `rofc_51.ipynb`
+Each measurement runs three notebooks that are already on that board, one after another:
 
-   The copies in `run/notebooks/` are not used.
-6. If one notebook fails, that board stops and does not run the notebooks after it. The other board continues.
-7. A board that is still measuring is not started again.
-8. After a round starts, the program waits `pynq_wait_threshold` seconds before it is allowed to start another round.
+1. `rofc_11.ipynb`
+2. `rofc_21.ipynb`
+3. `rofc_51.ipynb`
+
+The copies in `run/notebooks/` are not used. If one notebook fails, that board does not run the notebooks after it in that round. The next round can still start. The other window keeps running.
 
 ## Where the results go
 
 Results are written under `data/` in this folder. Git does not track that folder.
 
 ```text
-data/boards/board_01/pynq_run_data/    CSVs from 169.254.168.99
-data/boards/board_01/logs/
-data/boards/board_02/pynq_run_data/    CSVs from 169.254.168.100
-data/boards/board_02/logs/
+data/boards/board_01/                  lab account CSVs and logs
+data/boards/board_02/groupB/           group B CSVs and logs
 data/temperature_data/                 one shared oven log
 ```
 
-Each measurement file is named like `output_data_11_80C_0_2_5_time_0.csv`. The number after `output_data_` is the test (`11`, `21`, or `51`). `board_01` and `board_02` never write into each other's folders.
+`board_02_only.bat` uses the group name `groupB`, so that folder is `data/boards/board_02/groupB/`. The two result folders do not overlap.
 
 Do not run `lab_tools/average_outputs.py`. That script is for the TA. It deletes the raw CSVs after it averages them.
 
@@ -88,10 +83,10 @@ Students should not need these. `lab_tools/` is calibration, checks, and offline
 
 | Script | Use |
 | --- | --- |
-| `lab_tools/average_outputs.py` | Average each board's CSVs into `data/boards/<board>/averages/`. After that it deletes the raw CSVs it averaged and folds that board's logs into one daily log. Do not run it until the raw files have been copied somewhere safe |
-| `lab_tools/animate_example_prev.py` | Live plot of `data/temperature_data/live_temperature_data.csv` while the main run is going |
+| `lab_tools/average_outputs.py` | Average each board's top-level `pynq_run_data` CSVs into `data/boards/<board>/averages/`. After that it deletes the raw CSVs it averaged and folds that board's logs into one daily log. Do not run it until those raw files have been copied somewhere safe. It does not look inside `data/boards/board_02/<group>/` |
+| `lab_tools/animate_example_prev.py` | Live plot of `data/temperature_data/live_temperature_data.csv` while the oven run is going |
 | `lab_tools/plot_temp_vs_time.py` | Plot the saved oven log after a run |
-| `lab_tools/pynq_call_script.py` | Start the three notebooks on one board only. This does not run the oven. Default board is `board_01` |
+| `lab_tools/pynq_call_script.py` | Start the three notebooks on one board only. This does not run the oven |
 | `lab_tools/notebook_setup.py` | Run `rofc_setup.ipynb` on the boards, one board after another |
 | `lab_tools/calibrate_pid.py` | Oven PID calibration |
 | `lab_tools/oven_csv_single_read_list.py` | Dump oven registers. Uses its own serial port |
@@ -99,10 +94,27 @@ Students should not need these. `lab_tools/` is calibration, checks, and offline
 
 Register dumps are written to `data/oven_reads/`.
 
-`check_lab.bat` runs `python run/process_main.py --check`. `run_lab.bat` runs `python run/process_main.py`. Both use `.venv\Scripts\python.exe` when that file exists. Otherwise they use `py -3` when that Python can import the lab packages, and otherwise `python`. `python run/process_main.py --dry-run` only loads `run/config.py` and prints the board plan. It does not open the oven port and does not contact the boards.
+The four student bats change to the folder that contains the bat, then prefer `.venv\Scripts\python.exe`, then `py -3`, then `python`. They print `OK` or `FAIL`. A failure leaves the window open.
 
-The board list, SSH account, notebook names, and result folder are in `boards.py`. To add a third board, append an entry there. `board_03` at `169.254.168.101` is not enabled unless you add it. Set `"enabled": False` to leave a board in the list without starting it. Every enabled card must already have `rofc_11.ipynb`, `rofc_21.ipynb`, and `rofc_51.ipynb` in `/home/xilinx/jupyter_notebooks/rofc/`.
+| Bat | Command |
+| --- | --- |
+| `check_oven.bat` | `python run/oven_run.py --check --boards board_01` |
+| `oven_board_01.bat` | `python run/oven_run.py --boards board_01` |
+| `check_board_02.bat` | `python run/preflight.py --board board_02` |
+| `board_02_only.bat` | `python run/board_only.py --board board_02 --group groupB` |
+
+`python run/oven_run.py --dry-run --boards board_01` only loads `run/config.py` and prints `board_01`. It does not open the oven port and does not contact the boards.
+
+`run/oven_run.py` is the only script that opens the oven port and writes the temperature program. On start it writes `data/boards/board_01/OVEN_OWNED` and removes that file on exit, including Ctrl+C. If that file is already present, a second start prints one sentence and does not program the oven. `run/process_main.py` does not start the oven.
+
+`board_02_only.bat` writes `data/boards/board_02/BOARD_BUSY` while it runs and removes that file on exit, including Ctrl+C. It refuses to start when `data/boards/board_02/OVEN_OWNED` or `data/boards/board_02/BOARD_BUSY` is present. The oven run does not start a board that has `BOARD_BUSY`.
+
+If a window was closed without Ctrl+C and no matching window is still open, delete the stale `OVEN_OWNED` or `BOARD_BUSY` file before starting again. Do not delete it while a window is running.
+
+The board list, SSH account, and notebook names are in `boards.py`. `board_01` is `169.254.168.99`. `board_02` is `169.254.168.100`. `board_03` at `169.254.168.101` is not listed. The SSH account is `xilinx` / `xilinx`. Every measured board must already have `rofc_11.ipynb`, `rofc_21.ipynb`, and `rofc_51.ipynb` in `/home/xilinx/jupyter_notebooks/rofc/`.
 
 On the lab PC, results can be sent to the old data folder by setting `OUTPUT_ROOT` in `boards.py` to `Path(r"C:\pynq\pynq_data")`. The per-board folders are still created under that path.
 
-Install the main-run packages with `pip install -r requirements.txt` if `check_lab.bat` says an import is missing. The file lists minimum versions only, so a newer package that is already installed is left as it is.
+Install the main-run packages with `pip install -r requirements.txt` if a check says an import is missing. The file lists `minimalmodbus`, `paramiko`, `pandas`, and `matplotlib` with minimum versions only, so a newer package that is already installed is left as it is.
+
+Do not change `hardware_versions/` or the FPGA tcl for a student run.

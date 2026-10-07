@@ -1,5 +1,10 @@
-"""Checks the lab PC can see the oven and both boards. Does not start the oven."""
+"""Checks the lab PC before a run. Does not program the oven.
 
+The oven preflight may open the oven port and then close it. It does not
+write a temperature program. The board preflight never opens the port.
+"""
+
+import argparse
 import importlib.util
 import os
 import subprocess
@@ -144,14 +149,15 @@ def _remote_file_exists(ssh, path):
     return answer == "yes"
 
 
-def board_problems():
+def board_problems(board_list):
+    """Ping, SSH, and notebook checks for the boards in this list only."""
     problems = []
     try:
         import paramiko
     except Exception:
         paramiko = None
 
-    for board in boards.enabled_boards():
+    for board in board_list:
         ip = board["ip"]
         label = f"{board['id']} at {ip}"
         if not _ping_ok(ip):
@@ -201,6 +207,17 @@ def board_problems():
     return problems
 
 
+def lock_problems(board_list, marker_names):
+    """One sentence for each lock marker that is present."""
+    problems = []
+    for board in board_list:
+        for name in marker_names:
+            path = boards.board_output_dir(board["id"]) / name
+            if path.is_file():
+                problems.append(f"{board['id']} is held by {name}.")
+    return problems
+
+
 def output_root_problem():
     root = boards.OUTPUT_ROOT
     probe = root / ".write_test"
@@ -213,10 +230,21 @@ def output_root_problem():
     return None
 
 
-def run_checks(oven_port):
-    """Run every hardware check. Return 0 when all pass, 1 otherwise.
+def _finish(problems, announce=True):
+    if problems:
+        for problem in problems:
+            print(problem)
+        return 1
+    if announce:
+        print("OK")
+    return 0
 
-    Does not program the oven and does not start a temperature run.
+
+def run_oven_checks(oven_port, board_list, announce=True):
+    """Check imports, the oven port, and these boards.
+
+    The caller loads run/config.py before this. Opens the oven port and closes
+    it again. Does not write a temperature program.
     """
     problems = []
     problems.extend(import_problems())
@@ -224,32 +252,40 @@ def run_checks(oven_port):
         port_problem = oven_port_problem(oven_port)
         if port_problem:
             problems.append(port_problem)
-    problems.extend(board_problems())
+    problems.extend(board_problems(board_list))
     root_problem = output_root_problem()
     if root_problem:
         problems.append(root_problem)
+    problems.extend(lock_problems(board_list, ("BOARD_BUSY",)))
+    return _finish(problems, announce=announce)
 
-    if problems:
-        for problem in problems:
-            print(problem)
+
+def run_board_checks(board_list):
+    """Check one board-only job. Does not open the oven port."""
+    problems = []
+    problems.extend(import_problems())
+    problems.extend(board_problems(board_list))
+    root_problem = output_root_problem()
+    if root_problem:
+        problems.append(root_problem)
+    problems.extend(lock_problems(board_list, ("OVEN_OWNED", "BOARD_BUSY")))
+    return _finish(problems)
+
+
+def main(argv=None):
+    """Board preflight used by check_board_02.bat. Does not open the oven port."""
+    parser = argparse.ArgumentParser(
+        description="Check one PYNQ-Z2 before a board-only run. Does not open the oven port."
+    )
+    parser.add_argument("--board", required=True, help="Board id, for example board_02")
+    args = parser.parse_args(argv)
+    try:
+        board = boards.board_by_id(args.board)
+    except KeyError as exc:
+        print(exc)
         return 1
-    print("OK")
-    return 0
+    return run_board_checks([board])
 
 
 if __name__ == "__main__":
-    config_path = os.path.join(os.path.dirname(__file__), "config.py")
-    try:
-        _temps, _enable, _times, _wait, port = load_recipe(
-            config_path,
-            [80, 90, 100, 110],
-            [1, 0, 0, 0],
-            [10, 60 * 35],
-            60 * 30,
-            "COM4",
-        )
-    except SystemExit as exc:
-        if str(exc):
-            print(exc)
-        sys.exit(1)
-    sys.exit(run_checks(port))
+    sys.exit(main())

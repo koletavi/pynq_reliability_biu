@@ -9,7 +9,7 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 import boards
 
-# Path to the CSV file written by run/process_main.py
+# Path to the CSV file written by run/oven_run.py
 temperature_file = boards.TEMPERATURE_DIR / "temperature_data.csv"
 
 print("\n\nMeasurement sequence complete or terminated.")
