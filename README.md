@@ -8,7 +8,7 @@ Students do only the steps in "What you do". Everything else is for the TA.
 
 Edit only `run/config.py`. If the TA did not give you different temperatures or times, leave it as it is.
 
-### Lab account
+### Group A
 
 1. Double-click `check_oven.bat`.
 2. Wait until the window says `OK`. If it says `FAIL`, stop. Read the sentence above `FAIL` and call the TA. Do not start the oven.
@@ -18,11 +18,10 @@ Edit only `run/config.py`. If the TA did not give you different temperatures or 
 
 ### Group B
 
-1. Do not run `oven_board_01.bat`. The oven is already running.
-2. Double-click `check_board_02.bat`.
-3. Wait until the window says `OK`. If it says `FAIL`, stop. Read the sentence above `FAIL` and call the TA.
-4. Double-click `board_02_only.bat` and leave that window open.
-
+1. Double-click `check_board_02.bat`.
+2. Wait until the window says `OK`. If it says `FAIL`, stop. Read the sentence above `FAIL` and call the TA.
+3. Double-click `board_02_only.bat` and leave that window open.
+* notice - Do not run `oven_board_01.bat`. The oven is already running.
 `check_board_02.bat` does not open the oven port. `board_02_only.bat` measures `board_02` only. It does not start an oven program.
 
 Stop a job with Ctrl+C in its own window. That stops only that window. The other group's window keeps running.
