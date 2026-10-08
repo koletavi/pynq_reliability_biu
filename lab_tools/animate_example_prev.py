@@ -32,7 +32,7 @@ def animate(i):
         plt.legend(loc='upper left')
         plt.tight_layout()
     except FileNotFoundError:
-        print("live_temperature_data.csv not found. Ensure limited_csv_gen.py is running.")
+        print("live_temperature_data.csv not found. Start oven_board_01.bat and leave it running.")
     except pd.errors.EmptyDataError:
         print("CSV file is empty or corrupted.")
     except KeyError as e:

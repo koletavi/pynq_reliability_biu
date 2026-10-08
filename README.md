@@ -2,7 +2,7 @@
 
 One oven heats the boards. The lab account measures `board_01` and leaves that window open. Group B later uses the same PC and measures `board_02` only, while that oven run is still going. Group B does not start a second oven program. Both groups share the current oven temperature. Their result folders do not overlap.
 
-Students do only the steps in "What you do". Everything else is for the TA.
+Students use "What you do", "When the run is finished", and, if the TA asks for mail, "Mail notices". The last section is for the TA.
 
 ## What you do
 
@@ -13,15 +13,17 @@ Edit only `run/config.py`. If the TA did not give you different temperatures or 
 1. Double-click `check_oven.bat`.
 2. Wait until the window says `OK`. If it says `FAIL`, stop. Read the sentence above `FAIL` and call the TA. Do not start the oven.
 3. Double-click `oven_board_01.bat` and leave that window open for the whole run.
+4. To watch the oven temperature, double-click `watch_temperature.bat`. Leave the oven window open. Close the plot window when you are done watching.
 
-`check_oven.bat` does not start the oven. `oven_board_01.bat` programs the oven and measures `board_01` only.
+`check_oven.bat` does not start the oven. `oven_board_01.bat` programs the oven and measures `board_01` only. `watch_temperature.bat` only draws the live plot. It does not start or stop the oven.
 
 ### Group B
 
 1. Double-click `check_board_02.bat`.
 2. Wait until the window says `OK`. If it says `FAIL`, stop. Read the sentence above `FAIL` and call the TA.
-3. Double-click `board_02_only.bat` and leave that window open.
-* notice - Do not run `oven_board_01.bat`. The oven is already running.
+3. Double-click `board_02_only.bat` and leave that window open. Do not run `oven_board_01.bat`. The oven is already running.
+4. You can double-click `watch_temperature.bat` to see the same oven temperature. It does not start an oven program.
+
 `check_board_02.bat` does not open the oven port. `board_02_only.bat` measures `board_02` only. It does not start an oven program.
 
 Stop a job with Ctrl+C in its own window. That stops only that window. The other group's window keeps running.
@@ -74,24 +76,39 @@ data/temperature_data/                 one shared oven log
 
 `board_02_only.bat` uses the group name `groupB`, so that folder is `data/boards/board_02/groupB/`. The two result folders do not overlap.
 
-Do not run `lab_tools/average_outputs.py`. That script is for the TA. It deletes the raw CSVs after it averages them.
+`watch_temperature.bat` reads `data/temperature_data/live_temperature_data.csv`. That file appears after `oven_board_01.bat` has started recording. If the plot window is empty, read the console line and leave the oven window running.
+
+## When the run is finished
+
+Copy the raw CSVs somewhere safe before you average them.
+
+Double-click `average_outputs.bat`. Read the warning in the window. Type `YES` and press Enter. Any other answer stops and leaves the files alone.
+
+The bat averages CSVs in `data/boards/<board>/pynq_run_data` and writes `data/boards/<board>/averages/`. It then deletes those raw CSVs and folds that board's logs into one daily log. It does not read `data/boards/board_02/groupB/`, so group B's CSVs stay where they are.
 
 ## Mail notices
 
-Mail is optional. The run does not depend on mail. If `secrets/notify.json` is missing, the host is blank, or the password is blank, the notice is appended to `data/notify.log` and the run continues.
+Mail is optional. The oven run and the board run do not depend on it. A missing setup, a refused login, or a send error is appended to `data/notify.log`, and the run continues.
 
-To turn mail on, copy `secrets/notify.example.json` to `secrets/notify.json` and replace the `INSERT_` lines. A personal mailbox is fine for a test.
+To turn mail on:
 
-`python run/notify.py --test groupA` sends one test mail, or writes the log line if mail is not configured.
+1. Copy `secrets/notify.example.json` to `secrets/notify.json`.
+2. Replace every `INSERT_` line. `username` and `from` must be the mailbox that logs in. `smtp_port` stays `587`.
+3. Put the TA address in `ta`. Put each group's addresses in `groups`.
+4. From this folder, run `python run/notify.py --test groupA`.
+
+The command prints nothing. A sent test has the subject `PYNQ lab: test, groupA`. If no message arrives, open `data/notify.log`. A line that starts with `mail not sent:` is the reason. A personal Gmail mailbox works for a test: set `smtp_host` to `smtp.gmail.com` and use a Gmail app password. `secrets/notify.json` is not committed.
+
+Notices go to the TA and to group A when the oven run starts, when a measurement round fails, and when that run exits. An oven crash also goes to group B. A failed round is mailed once, and the next failure is mailed only after a later round succeeds. Group B's own start, round failure, and exit go to that group and to the TA.
 
 ## For the TA
 
-Students should not need these. `lab_tools/` is calibration, checks, and offline processing.
+`watch_temperature.bat` and `average_outputs.bat` are the two extra launchers from the sections above. The other rows are calibration, checks, and offline processing.
 
 | Script | Use |
 | --- | --- |
-| `lab_tools/average_outputs.py` | Average each board's top-level `pynq_run_data` CSVs into `data/boards/<board>/averages/`. After that it deletes the raw CSVs it averaged and folds that board's logs into one daily log. Do not run it until those raw files have been copied somewhere safe. It does not look inside `data/boards/board_02/<group>/` |
-| `lab_tools/animate_example_prev.py` | Live plot of `data/temperature_data/live_temperature_data.csv` while the oven run is going |
+| `average_outputs.bat` | Runs `lab_tools/average_outputs.py` after you type `YES`. Averages each board's top-level `pynq_run_data` CSVs into `data/boards/<board>/averages/`, then deletes those raw CSVs and folds that board's logs into one daily log. Copy the raw files first. It does not look inside `data/boards/board_02/<group>/` |
+| `watch_temperature.bat` | Runs `lab_tools/animate_example_prev.py`. Live plot of `data/temperature_data/live_temperature_data.csv` while the oven run is going. Close the plot window to stop |
 | `lab_tools/plot_temp_vs_time.py` | Plot the saved oven log after a run |
 | `lab_tools/pynq_call_script.py` | Start the three notebooks on one board only. This does not run the oven |
 | `lab_tools/notebook_setup.py` | Run `rofc_setup.ipynb` on the boards, one board after another |
@@ -101,7 +118,7 @@ Students should not need these. `lab_tools/` is calibration, checks, and offline
 
 Register dumps are written to `data/oven_reads/`.
 
-The four student bats change to the folder that contains the bat, then prefer `.venv\Scripts\python.exe`, then `py -3`, then `python`. They print `OK` or `FAIL`. A failure leaves the window open.
+Every bat changes to the folder that contains the bat, then prefers `.venv\Scripts\python.exe`, then `py -3`, then `python`. It prints `OK` or `FAIL`. A failure leaves the window open. `watch_temperature.bat` and `average_outputs.bat` also leave the window open after `OK`, so the last lines stay visible. `average_outputs.bat` runs the script only after you type `YES`.
 
 | Bat | Command |
 | --- | --- |
@@ -109,6 +126,8 @@ The four student bats change to the folder that contains the bat, then prefer `.
 | `oven_board_01.bat` | `python run/oven_run.py --boards board_01` |
 | `check_board_02.bat` | `python run/preflight.py --board board_02` |
 | `board_02_only.bat` | `python run/board_only.py --board board_02 --group groupB` |
+| `watch_temperature.bat` | `python lab_tools/animate_example_prev.py` |
+| `average_outputs.bat` | `python lab_tools/average_outputs.py` |
 
 `python run/oven_run.py --dry-run --boards board_01` only loads `run/config.py` and prints `board_01`. It does not open the oven port and does not contact the boards.
 
