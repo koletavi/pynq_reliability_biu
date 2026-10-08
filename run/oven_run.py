@@ -32,6 +32,7 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 import boards
+import notify
 import preflight
 
 #--------------------------------#
@@ -367,6 +368,76 @@ def format_board_result(board_id, result_path, return_code=None):
     return format_round_line(board_id, result_path, return_code)
 
 
+_run_notice = {
+    "started": False,
+    "crashed": False,
+    "exit_sent": False,
+    "failure_open": False,
+}
+
+
+def _reset_run_notice():
+    _run_notice["started"] = False
+    _run_notice["crashed"] = False
+    _run_notice["exit_sent"] = False
+    _run_notice["failure_open"] = False
+
+
+def _oven_folders(board_ids):
+    folders = []
+    for board_id in board_ids:
+        folders.append(str(boards.board_output_dir(board_id)))
+    return "; ".join(folders)
+
+
+def _note_oven_round(line):
+    """Mail the first failed round, then wait for a success before mailing again."""
+    try:
+        failed_ids = []
+        for chunk in line.split(","):
+            chunk = chunk.strip()
+            if ":" not in chunk:
+                continue
+            name, rest = chunk.split(":", 1)
+            if "failed" in rest or "no result" in rest:
+                failed_ids.append(name.strip())
+        if not failed_ids:
+            _run_notice["failure_open"] = False
+            return
+        if _run_notice["failure_open"]:
+            return
+        _run_notice["failure_open"] = True
+        notify.send_notice(
+            "oven round failed",
+            ", ".join(failed_ids),
+            "groupA",
+            _oven_folders(failed_ids),
+            ["groupA"],
+        )
+    except Exception:
+        return
+
+
+def _send_oven_exit(selected):
+    if not _run_notice["started"] or _run_notice["exit_sent"]:
+        return
+    _run_notice["exit_sent"] = True
+    board_ids = [board["id"] for board in selected]
+    if _run_notice["crashed"]:
+        event = "oven crashed"
+        group_names = ["groupA", "groupB"]
+    else:
+        event = "oven exited"
+        group_names = ["groupA"]
+    notify.send_notice(
+        event,
+        ", ".join(board_ids),
+        ", ".join(group_names),
+        _oven_folders(board_ids),
+        group_names,
+    )
+
+
 def print_round_summary(line):
     """Print one summary line above the live status block.
 
@@ -375,9 +446,10 @@ def print_round_summary(line):
     """
     if not _VT_ENABLED:
         print(line)
-        return
-    sys.stdout.write("\033[L" + line + "\033[1E")
-    sys.stdout.flush()
+    else:
+        sys.stdout.write("\033[L" + line + "\033[1E")
+        sys.stdout.flush()
+    _note_oven_round(line)
 
 
 def report_finished_rounds(open_rounds):
@@ -651,9 +723,11 @@ def run_oven_loop(selected, state):
 
     except minimalmodbus.NoResponseError as nre:
         print(f"\n\nNo response from the instrument: {nre}")
+        _run_notice["crashed"] = True
         return
     except Exception as e:
         print(f"\n\nError during initialization: {e}")
+        _run_notice["crashed"] = True
         return
     finally:
         print("\n\nMeasurement sequence complete or terminated.")
@@ -675,6 +749,7 @@ def load_user_config():
 
 def main(argv=None):
     args = parse_args(argv)
+    _reset_run_notice()
     # A second start must stop before config noise, the port, or another program.
     if not args.dry_run and boards.find_oven_owned() is not None:
         print("An oven run is already active.")
@@ -710,10 +785,25 @@ def main(argv=None):
         if created is None:
             return 1
         markers = created
+        board_ids = [board["id"] for board in free]
+        _run_notice["started"] = True
+        notify.send_notice(
+            "oven started",
+            ", ".join(board_ids),
+            "groupA",
+            _oven_folders(board_ids),
+            ["groupA"],
+        )
         run_oven_loop(free, state)
+    except KeyboardInterrupt:
+        raise
+    except Exception:
+        _run_notice["crashed"] = True
+        raise
     finally:
         for marker in markers:
             boards.remove_marker(marker)
+        _send_oven_exit(free)
         show_plot(state["temperature_file"])
     return 0
 

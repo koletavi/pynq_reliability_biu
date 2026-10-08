@@ -18,11 +18,35 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 import boards
+import notify
 import preflight
 
 PYNQ_RUN_SCRIPT = Path(__file__).resolve().parent / "pynq_run_script.py"
 GROUP_NAME = re.compile(r"[A-Za-z0-9_-]+")
 USAGE = "Usage: python run/board_only.py --board board_02 --group groupB"
+_board_failure_open = False
+
+
+def _note_board_round(board_id, group, folder, line):
+    """Mail the first failed round, then wait for a success before mailing again."""
+    global _board_failure_open
+    try:
+        failed = "failed" in line or "no result" in line
+        if not failed:
+            _board_failure_open = False
+            return
+        if _board_failure_open:
+            return
+        _board_failure_open = True
+        notify.send_notice(
+            "board_only round failed",
+            board_id,
+            group,
+            folder,
+            [group],
+        )
+    except Exception:
+        return
 
 
 def parse_args(argv=None):
@@ -121,6 +145,7 @@ def run_round(board, output_dir, temp, time_str):
         result_path.unlink()
     except OSError:
         pass
+    _note_board_round(board["id"], output_dir.name, str(output_dir), line)
     return line
 
 
@@ -155,7 +180,16 @@ def main(argv=None):
 
     output_dir = boards.group_output_dir(board["id"], args.group)
     started = time.time()
+    global _board_failure_open
+    _board_failure_open = False
     try:
+        notify.send_notice(
+            "board_only started",
+            board["id"],
+            args.group,
+            str(output_dir),
+            [args.group],
+        )
         while True:
             temp = shared_temperature_label()
             time_str = elapsed_label(started)
@@ -164,6 +198,13 @@ def main(argv=None):
             time.sleep(wait_seconds)
     finally:
         boards.remove_marker(busy_path)
+        notify.send_notice(
+            "board_only exited",
+            board["id"],
+            args.group,
+            str(output_dir),
+            [args.group],
+        )
 
 
 if __name__ == "__main__":

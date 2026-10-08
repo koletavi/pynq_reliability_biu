@@ -76,6 +76,14 @@ data/temperature_data/                 one shared oven log
 
 Do not run `lab_tools/average_outputs.py`. That script is for the TA. It deletes the raw CSVs after it averages them.
 
+## Mail notices
+
+Mail is optional. The run does not depend on mail. If `secrets/notify.json` is missing, the host is blank, or the password is blank, the notice is appended to `data/notify.log` and the run continues.
+
+To turn mail on, copy `secrets/notify.example.json` to `secrets/notify.json` and replace the `INSERT_` lines. A personal mailbox is fine for a test.
+
+`python run/notify.py --test groupA` sends one test mail, or writes the log line if mail is not configured.
+
 ## For the TA
 
 Students should not need these. `lab_tools/` is calibration, checks, and offline processing.

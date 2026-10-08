@@ -1,6 +1,10 @@
 # Ignore PYNQ data directory
 pynq_data/
 
+# Lab mail password. secrets/notify.json is not committed.
+secrets/*
+!secrets/notify.example.json
+
 # Experiment output (temperature logs and per-board CSVs)
 data/
 
