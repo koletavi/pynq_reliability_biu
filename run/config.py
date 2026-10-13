@@ -28,3 +28,14 @@ pynq_wait_threshold = 60*10
 # Leave this unset unless the TA tells you to change it. The default is COM4.
 # oven_port = "COM4"
 
+# notebook_params: values written into the notebooks on the PYNQ card before each run.
+# The copies in run/notebooks/ are not executed.
+# ctr_run_time: run length in 100 MHz cycles.
+# ro_sel: ring oscillator. 1=not, 3=nor, 5 or 7=nand.
+# sample_size: number of samples. It has to match the bitstream on that card.
+notebook_params = {
+    "rofc_11.ipynb": {"ctr_run_time": 300_000_000, "ro_sel": 1, "sample_size": 100},
+    "rofc_21.ipynb": {"ctr_run_time": 300_000_000, "ro_sel": 3, "sample_size": 100},
+    "rofc_51.ipynb": {"ctr_run_time": 300_000_000, "ro_sel": 5, "sample_size": 100},
+}
+

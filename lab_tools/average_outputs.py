@@ -37,9 +37,14 @@ def plot_avg_bar_graph(csv_path, gate_type):
         try:
             val = float(v)
             values.append(val)
-            # Extract just the time and index from the header
-            time_index = h.split('min_')  # Split at 'min_'
-            labels.append(f"{float(time_index[0]):.2f}min_{time_index[1]}")
+            # Header is "<minutes>min_<index>" or "<YYYY_MM_DD>_<minutes>min_<index>".
+            left, right = h.split('min_', 1)
+            minutes = float(left.rsplit('_', 1)[-1])
+            date_prefix = left[:left.rfind('_')] if '_' in left else ""
+            if date_prefix:
+                labels.append(f"{date_prefix}_{minutes:.2f}min_{right}")
+            else:
+                labels.append(f"{minutes:.2f}min_{right}")
         except (ValueError, TypeError):
             continue
 
@@ -54,28 +59,48 @@ def plot_avg_bar_graph(csv_path, gate_type):
     plt.close()  # free figure resources
 
 
-# Regex to match files like output_data_not_0C_1_2_3_time_4.csv
-pattern = re.compile(r"output_data_(\w+?)_(\d+C)_(\d+)_(\d+)_(\d+)_time_(\d+)\.csv$")
+# output_data_11_80C_2026_10_08_1_2_3_time_0.csv
+# Older files without a date still match: output_data_11_80C_1_2_3_time_0.csv
+pattern = re.compile(
+    r"output_data_(\w+?)_(\d+C)_(?:(\d{4})_(\d{2})_(\d{2})_)?(\d+)_(\d+)_(\d+)_time_(\d+)\.csv$"
+)
+
+
+def measurement_parts(fname):
+    """Return the name fields, or None when the file is not a measurement CSV."""
+    match = pattern.match(fname)
+    if not match:
+        return None
+    if match.group(3):
+        day = f"{match.group(3)}_{match.group(4)}_{match.group(5)}"
+    else:
+        day = ""
+    return {
+        "gate": match.group(1),
+        "temp": match.group(2),
+        "date": day,
+        "hours": int(match.group(6)),
+        "minutes": int(match.group(7)),
+        "seconds": int(match.group(8)),
+        "index": int(match.group(9)),
+    }
+
 
 def parse_time(fname):
-    """Extract and convert time components to seconds for sorting"""
-    match = pattern.match(fname)
-    if match:
-        hours = int(match.group(3))
-        minutes = int(match.group(4))
-        seconds = int(match.group(5))
-        index = int(match.group(6))  # Use index for secondary sorting
-        return (hours * 3600 + minutes * 60 + seconds, index)
-    return (0, 0)
+    """Sort by date, then elapsed time, then the file counter."""
+    parts = measurement_parts(fname)
+    if parts:
+        elapsed = parts["hours"] * 3600 + parts["minutes"] * 60 + parts["seconds"]
+        return (parts["date"], elapsed, parts["index"])
+    return ("", 0, 0)
 
 def group_files_by_temp(directory):
     # Group all files by temperature only
     groups = defaultdict(list)
     for fname in os.listdir(directory):
-        match = pattern.match(fname)
-        if match:
-            temp = match.group(2)
-            groups[temp].append(fname)
+        parts = measurement_parts(fname)
+        if parts:
+            groups[parts["temp"]].append(fname)
     
     # Sort files within each group by time
     for temp in groups:
@@ -92,31 +117,29 @@ def write_avg_csv_for_temp(temp, files, directory, avg_output_dir):
     # Group files by gate type
     gate_groups = defaultdict(list)
     for f in files:
-        match = pattern.match(f)
-        if match:
-            gate_type = match.group(1)
-            gate_groups[gate_type].append(f)
+        parts = measurement_parts(f)
+        if parts:
+            gate_groups[parts["gate"]].append(f)
     
     # Process each gate type separately
     for gate_type, gate_files in gate_groups.items():
         # Prepare header with time information in minutes and sort by time first
         header_info = []
         for f in gate_files:
-            match = pattern.match(f)
-            if match:
-                hours = int(match.group(3))
-                mins = int(match.group(4))
-                secs = int(match.group(5))
-                index = match.group(6)
-                total_minutes = (hours * 60) + mins + (secs / 60)
-                header_info.append((total_minutes, index, f))
+            parts = measurement_parts(f)
+            if parts:
+                total_minutes = parts["hours"] * 60 + parts["minutes"] + (parts["seconds"] / 60)
+                header_info.append((parts["date"], total_minutes, parts["index"], f))
 
-        # Sort by time
-        header_info.sort(key=lambda x: x[0])
+        header_info.sort(key=lambda item: (item[0], item[1], item[2]))
 
-        # Create sorted headers and reorganize files list to match
-        header = [f"{h[0]:.2f}min_{h[1]}" for h in header_info]
-        gate_files = [h[2] for h in header_info]
+        header = []
+        for day, total_minutes, index, _fname in header_info:
+            label = f"{total_minutes:.2f}min_{index}"
+            if day:
+                label = f"{day}_{label}"
+            header.append(label)
+        gate_files = [item[3] for item in header_info]
 
         # Now read CSV data in the sorted order so that data matches header/file order
         data = [read_csv_ignore_zeros(os.path.join(directory, f)) for f in gate_files]
@@ -125,7 +148,8 @@ def write_avg_csv_for_temp(temp, files, directory, avg_output_dir):
         # Write output
         os.makedirs(avg_output_dir, exist_ok=True)
         avg_file = os.path.join(avg_output_dir, f"avg_output_data_{temp}_{gate_type}.csv")
-        
+        boards.clear_readonly(avg_file)
+
         with open(avg_file, 'w', newline='') as f:
             writer = csv.writer(f)
             writer.writerow(['Time'] + header)  # Add 'Time' as first column header
@@ -156,25 +180,10 @@ def write_avg_csv_for_temp(temp, files, directory, avg_output_dir):
                 avg = sum(vals)/len(vals) if vals else ''
                 avg_row.append(avg)
             writer.writerow(avg_row)
-            
+
+        boards.mark_readonly(avg_file)
         # Plot the bar graph for this gate type
         plot_avg_bar_graph(avg_file, gate_type)
-
-
-def cleanup_pynq_run_data(directory):
-    """Delete CSV files in the given directory that match the expected PYNQ output pattern.
-
-    This removes files like `output_data_<gate>_<temp>_..._time_#.csv` to keep
-    the run directory clean after averages are generated.
-    """
-    for fname in os.listdir(directory):
-        if pattern.match(fname) and fname.lower().endswith('.csv'):
-            try:
-                path = os.path.join(directory, fname)
-                os.remove(path)
-            except OSError:
-                # ignore failures to delete individual files
-                pass
 
 
 def create_daily_summary_log(log_dir):
@@ -232,8 +241,6 @@ def main():
         avg_dir = str(board_dir / "averages")
         for temp, files in groups.items():
             write_avg_csv_for_temp(temp, files, str(data_dir), avg_dir)
-        # cleanup generated/processed CSV files from this board's run directory
-        cleanup_pynq_run_data(str(data_dir))
         try:
             if log_dir.is_dir():
                 create_daily_summary_log(str(log_dir))

@@ -4,9 +4,9 @@ cd /d "%~dp0"
 
 echo This averages CSVs in data\boards\^<board^>\pynq_run_data
 echo and writes data\boards\^<board^>\averages\.
-echo It then deletes those raw CSVs and folds that board's logs into one daily log.
+echo The raw CSVs stay in place.
+echo That board's logs are folded into one daily log, and those original logs are removed.
 echo It does not read data\boards\board_02\groupB\.
-echo Copy the raw CSVs somewhere safe before you continue.
 echo.
 set /p ANSWER=Type YES to continue: 
 if /i not "%ANSWER%"=="YES" goto cancelled

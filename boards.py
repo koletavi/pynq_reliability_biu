@@ -9,6 +9,7 @@ board is started even when enabled is False. An enabled board that is not
 named is not started.
 """
 import os
+import stat
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parent
@@ -105,3 +106,21 @@ def remove_marker(path):
         path.unlink()
     except OSError:
         pass
+
+
+def mark_readonly(path):
+    """Mark a finished CSV read-only. A missing file is ignored."""
+    try:
+        os.chmod(path, stat.S_IREAD)
+    except OSError:
+        return
+
+
+def clear_readonly(path):
+    """Allow a later run to replace a CSV that was marked read-only."""
+    try:
+        if not os.path.exists(path):
+            return
+        os.chmod(path, stat.S_IWRITE | stat.S_IREAD)
+    except OSError:
+        return

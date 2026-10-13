@@ -47,6 +47,7 @@ Edit **only** `run/config.py`. The program reads that file when it starts and st
 | `time_list` | `[rise minutes, hold minutes]` | Exactly two numbers, each at least 10. The first is how long the oven may take to reach the setpoint. The second is how long it stays there |
 | `pynq_wait_threshold` | Seconds to wait after one measurement round before the next one can start | At least 120. `60*10` means 10 minutes |
 | `oven_port` | Serial port of the oven controller. Optional | Leave it unset. The default is `COM4`. Change it only if the TA tells you the port name |
+| `notebook_params` | `ctr_run_time`, `ro_sel`, and `sample_size` for each notebook on the PYNQ card | One entry each for `rofc_11.ipynb`, `rofc_21.ipynb`, and `rofc_51.ipynb`. `ctr_run_time` is a whole number from 1 to 4294967295, in 100 MHz cycles. `ro_sel` is 1 (not), 3 (nor), 5 (nand), or 7 (nand). `sample_size` is a whole number of at least 1 and has to match the bitstream |
 
 The checked-in file runs only the first setpoint (80°C), with a 10 minute rise, a 60 minute hold, and 10 minutes between measurement rounds.
 
@@ -62,7 +63,7 @@ Each measurement runs three notebooks that are already on that board, one after 
 2. `rofc_21.ipynb`
 3. `rofc_51.ipynb`
 
-The copies in `run/notebooks/` are not used. If one notebook fails, that board does not run the notebooks after it in that round. The next round can still start. The other window keeps running.
+The copies in `run/notebooks/` are not used. Before a notebook runs, the script writes that notebook's `ctr_run_time`, `ro_sel`, and `sample_size` from `run/config.py` into the notebook on the card. A hand edit on the card is replaced the next time that notebook runs. If one notebook fails, that board does not run the notebooks after it in that round. The next round can still start. The other window keeps running.
 
 ## Where the results go
 
@@ -76,15 +77,15 @@ data/temperature_data/                 one shared oven log
 
 `board_02_only.bat` uses the group name `groupB`, so that folder is `data/boards/board_02/groupB/`. The two result folders do not overlap.
 
+A measurement CSV is named like `output_data_11_80C_2026_10_08_1_2_3_time_0.csv`. The date is `YYYY_MM_DD` and sits between the temperature and the elapsed time. Each measurement CSV is marked read-only after it is copied. An average CSV is marked read-only after it is written. The oven temperature logs stay writable, because the oven run keeps appending to them.
+
 `watch_temperature.bat` reads `data/temperature_data/live_temperature_data.csv`. That file appears after `oven_board_01.bat` has started recording. If the plot window is empty, read the console line and leave the oven window running.
 
 ## When the run is finished
 
-Copy the raw CSVs somewhere safe before you average them.
-
 Double-click `average_outputs.bat`. Read the warning in the window. Type `YES` and press Enter. Any other answer stops and leaves the files alone.
 
-The bat averages CSVs in `data/boards/<board>/pynq_run_data` and writes `data/boards/<board>/averages/`. It then deletes those raw CSVs and folds that board's logs into one daily log. It does not read `data/boards/board_02/groupB/`, so group B's CSVs stay where they are.
+The bat averages CSVs in `data/boards/<board>/pynq_run_data` and writes `data/boards/<board>/averages/`. Those raw CSVs stay in place. It folds that board's logs into one daily log and removes the original log files. It does not read `data/boards/board_02/groupB/`, so group B's CSVs stay where they are.
 
 ## Mail notices
 
@@ -107,7 +108,7 @@ Notices go to the TA and to group A when the oven run starts, when a measurement
 
 | Script | Use |
 | --- | --- |
-| `average_outputs.bat` | Runs `lab_tools/average_outputs.py` after you type `YES`. Averages each board's top-level `pynq_run_data` CSVs into `data/boards/<board>/averages/`, then deletes those raw CSVs and folds that board's logs into one daily log. Copy the raw files first. It does not look inside `data/boards/board_02/<group>/` |
+| `average_outputs.bat` | Runs `lab_tools/average_outputs.py` after you type `YES`. Averages each board's top-level `pynq_run_data` CSVs into `data/boards/<board>/averages/` and leaves those raw CSVs in place. It folds that board's logs into one daily log and removes the original log files. It does not look inside `data/boards/board_02/<group>/` |
 | `watch_temperature.bat` | Runs `lab_tools/animate_example_prev.py`. Live plot of `data/temperature_data/live_temperature_data.csv` while the oven run is going. Close the plot window to stop |
 | `lab_tools/plot_temp_vs_time.py` | Plot the saved oven log after a run |
 | `lab_tools/pynq_call_script.py` | Start the three notebooks on one board only. This does not run the oven |

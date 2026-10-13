@@ -18,6 +18,118 @@ import boards
 
 REQUIRED_IMPORTS = ("minimalmodbus", "paramiko", "pandas", "matplotlib")
 CALL_TA = "Leave the script. Call the TA."
+NOTEBOOK_PARAM_NAMES = ("ctr_run_time", "ro_sel", "sample_size")
+RO_SEL_VALUES = (1, 3, 5, 7)
+MAX_CTR_RUN_TIME = 2**32 - 1
+DEFAULT_NOTEBOOK_PARAMS = {
+    "rofc_11.ipynb": {"ctr_run_time": 100_000_000, "ro_sel": 1, "sample_size": 100},
+    "rofc_21.ipynb": {"ctr_run_time": 300_000_000, "ro_sel": 3, "sample_size": 100},
+    "rofc_51.ipynb": {"ctr_run_time": 300, "ro_sel": 5, "sample_size": 100},
+}
+
+
+def _required_notebook_names():
+    return [name for name, _csv in boards.NOTEBOOKS]
+
+
+def _positive_int(value, name):
+    if isinstance(value, bool) or not isinstance(value, int):
+        raise SystemExit(f"Configuration error: `{name}` must be an integer.")
+    if value < 1:
+        raise SystemExit(f"Configuration error: `{name}` must be at least 1.")
+    return value
+
+
+def _copy_notebook_params(source):
+    copied = {}
+    for name, values in source.items():
+        copied[name] = {key: values[key] for key in NOTEBOOK_PARAM_NAMES}
+    return copied
+
+
+def _validate_notebook_params(raw):
+    """Return one validated value set for every notebook the run calls."""
+    expected = _required_notebook_names()
+    if not isinstance(raw, dict):
+        raise SystemExit("Configuration error: `notebook_params` must be a dict of notebook names.")
+    missing = [name for name in expected if name not in raw]
+    if missing:
+        raise SystemExit(
+            "Configuration error: `notebook_params` is missing " + ", ".join(missing) + "."
+        )
+    unknown = [name for name in raw if name not in expected]
+    if unknown:
+        raise SystemExit(
+            "Configuration error: `notebook_params` has unknown notebook "
+            + ", ".join(unknown)
+            + "."
+        )
+    validated = {}
+    for name in expected:
+        entry = raw[name]
+        if not isinstance(entry, dict):
+            raise SystemExit(f"Configuration error: `notebook_params['{name}']` must be a dict.")
+        extra = [key for key in entry if key not in NOTEBOOK_PARAM_NAMES]
+        if extra:
+            raise SystemExit(
+                f"Configuration error: `notebook_params['{name}']` has unknown setting {extra[0]}."
+            )
+        absent = [key for key in NOTEBOOK_PARAM_NAMES if key not in entry]
+        if absent:
+            raise SystemExit(
+                f"Configuration error: `notebook_params['{name}']` is missing {absent[0]}."
+            )
+        ctr_run_time = _positive_int(entry["ctr_run_time"], f"notebook_params['{name}']['ctr_run_time']")
+        if ctr_run_time > MAX_CTR_RUN_TIME:
+            raise SystemExit(
+                f"Configuration error: `notebook_params['{name}']['ctr_run_time']` must be at most {MAX_CTR_RUN_TIME}."
+            )
+        ro_sel = _positive_int(entry["ro_sel"], f"notebook_params['{name}']['ro_sel']")
+        if ro_sel not in RO_SEL_VALUES:
+            raise SystemExit(
+                f"Configuration error: `notebook_params['{name}']['ro_sel']` must be 1, 3, 5, or 7."
+            )
+        sample_size = _positive_int(entry["sample_size"], f"notebook_params['{name}']['sample_size']")
+        validated[name] = {
+            "ctr_run_time": ctr_run_time,
+            "ro_sel": ro_sel,
+            "sample_size": sample_size,
+        }
+    return validated
+
+
+def notebook_params_from_module(user_config, announce=True):
+    """Read notebook_params from an already loaded config module."""
+    if not hasattr(user_config, "notebook_params"):
+        params = _copy_notebook_params(DEFAULT_NOTEBOOK_PARAMS)
+        if announce:
+            print("No `notebook_params` in config.py — using the built-in notebook values.")
+    else:
+        params = _validate_notebook_params(user_config.notebook_params)
+    if announce:
+        for name in _required_notebook_names():
+            values = params[name]
+            print(
+                f"Using `{name}`: ctr_run_time={values['ctr_run_time']}, "
+                f"ro_sel={values['ro_sel']}, sample_size={values['sample_size']}"
+            )
+    return params
+
+
+def load_notebook_params(config_path, announce=True):
+    """Load run/config.py and return the notebook values that will be written to the boards."""
+    if not os.path.exists(config_path):
+        return notebook_params_from_module(object(), announce=announce)
+    spec = importlib.util.spec_from_file_location("user_notebook_config", config_path)
+    user_config = importlib.util.module_from_spec(spec)
+    assert spec and spec.loader
+    try:
+        spec.loader.exec_module(user_config)
+    except SystemExit:
+        raise
+    except Exception as exc:
+        raise SystemExit(f"Error loading config.py: {exc}")
+    return notebook_params_from_module(user_config, announce=announce)
 
 
 def load_recipe(config_path, temperature_list, temperature_enable, time_list, pynq_wait_threshold, oven_port="COM4"):
@@ -101,6 +213,7 @@ def load_recipe(config_path, temperature_list, temperature_enable, time_list, py
                 raise SystemExit("Configuration error: `oven_port` must be a port name such as COM4.")
             oven_port = port.strip()
 
+        notebook_params_from_module(user_config, announce=True)
         return temperature_list, temperature_enable, time_list, pynq_wait_threshold, oven_port
     except SystemExit:
         raise

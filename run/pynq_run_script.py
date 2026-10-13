@@ -1,7 +1,11 @@
 import argparse
+import json
 import os
+import re
+import shlex
 import sys
 import time
+from datetime import date
 from pathlib import Path
 
 import paramiko
@@ -10,6 +14,7 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 import boards
+import preflight
 
 POLL_TIMEOUT = 5 * 60  # Maximum seconds to wait for output file
 POLL_INTERVAL = 1  # Seconds between file existence checks
@@ -34,15 +39,96 @@ def get_unique_log_path(log_dir):
 
 
 def get_unique_output_path(base_output_path, suffix, temp, time_str):
-    """Generate a unique output file path with an incrementing number."""
+    """Generate a unique output file path with an incrementing number.
+
+    The date sits between the temperature and the elapsed-time label:
+    output_data_11_80C_2026_10_08_1_2_3_time_0.csv
+    """
     base_name = os.path.splitext(base_output_path)[0]
+    day = date.today().strftime("%Y_%m_%d")
     log(f"Base output path: {base_name}")
     counter = 0
     while True:
-        new_path = f"{base_name}_{temp}C_{time_str}_{counter}{suffix}"
+        new_path = f"{base_name}_{temp}C_{day}_{time_str}_{counter}{suffix}"
         if not os.path.exists(new_path):
             return new_path
         counter += 1
+
+
+def patch_source_text(text, params):
+    """Replace the three assignments. Return None when this cell has none of them."""
+    patterns = {
+        name: re.compile(rf"^(\s*){name}\s*=\s*[^#\n]*", re.M)
+        for name in ("ctr_run_time", "ro_sel", "sample_size")
+    }
+    counts = {name: len(patterns[name].findall(text)) for name in patterns}
+    if all(count == 0 for count in counts.values()):
+        return None
+    if any(count != 1 for count in counts.values()):
+        found = ", ".join(f"{name} x{count}" for name, count in counts.items())
+        raise ValueError(f"expected one assignment each, found {found}")
+    for name, pattern in patterns.items():
+        text = pattern.sub(rf"\g<1>{name} = {int(params[name])} ", text, count=1)
+    return text
+
+
+def patch_notebook(notebook, params):
+    """Write ctr_run_time, ro_sel, and sample_size into the notebook that will run."""
+    patched = 0
+    for cell in notebook.get("cells", []):
+        if cell.get("cell_type") != "code":
+            continue
+        source = cell.get("source", "")
+        as_list = isinstance(source, list)
+        text = "".join(source) if as_list else source
+        updated = patch_source_text(text, params)
+        if updated is None:
+            continue
+        cell["source"] = updated.splitlines(keepends=True) if as_list else updated
+        patched += 1
+    if patched == 0:
+        raise ValueError("no cell contains ctr_run_time, ro_sel, and sample_size")
+    return notebook
+
+
+def push_notebook_params(ssh, notebook_path, params, password):
+    """Read the notebook on the board, set the three values, and save it back.
+
+    nbconvert then executes that same file. The local copies are not used.
+    The notebook directory on the card is owned by root, so the copy uses sudo
+    with the same password that opened SSH.
+    """
+    sftp = ssh.open_sftp()
+    tmp_path = f"/tmp/{os.path.basename(notebook_path)}.config.tmp"
+    try:
+        with sftp.file(notebook_path, "r") as remote:
+            raw = remote.read()
+        notebook = json.loads(raw.decode("utf-8"))
+        patch_notebook(notebook, params)
+        payload = json.dumps(notebook, ensure_ascii=False, indent=1)
+        if not payload.endswith("\n"):
+            payload += "\n"
+        with sftp.file(tmp_path, "w") as remote:
+            remote.write(payload.encode("utf-8"))
+    finally:
+        sftp.close()
+
+    quoted_tmp = shlex.quote(tmp_path)
+    quoted_dest = shlex.quote(notebook_path)
+    inner = f"cp {quoted_tmp} {quoted_dest} && chmod 644 {quoted_dest}"
+    command = f"sudo -S -p '' bash -c {shlex.quote(inner)} && rm -f {quoted_tmp}"
+    stdin, stdout, stderr = ssh.exec_command(command)
+    stdin.write(password + "\n")
+    stdin.flush()
+    errors = stderr.read().decode(errors="replace")
+    exit_status = stdout.channel.recv_exit_status()
+    if exit_status != 0:
+        ssh.exec_command(f"rm -f {quoted_tmp}")
+        detail = "\n".join(
+            line for line in errors.splitlines()
+            if line.strip() and "password" not in line.lower()
+        )
+        raise RuntimeError(f"could not update {notebook_path}: {detail or 'exit ' + str(exit_status)}")
 
 
 def notebook_failed(exit_status, output, errors):
@@ -60,7 +146,7 @@ def notebook_failed(exit_status, output, errors):
     return False
 
 
-def execute_notebook_and_copy(notebook_name, output_csv_name, ip, username, password, remote_notebook_dir, data_dir, temp, time_str, board_id):
+def execute_notebook_and_copy(notebook_name, output_csv_name, ip, username, password, remote_notebook_dir, data_dir, temp, time_str, board_id, params):
     """Execute a Jupyter notebook on one PYNQ-Z2 via SSH and copy the updated CSV file with a unique name."""
     ssh = None
     scp = None
@@ -74,6 +160,12 @@ def execute_notebook_and_copy(notebook_name, output_csv_name, ip, username, pass
         output_file = remote_notebook_dir + output_csv_name
         local_output_base = os.path.join(data_dir, output_csv_name)
         local_output_path = get_unique_output_path(local_output_base, ".csv", temp, time_str)
+
+        log(
+            f"{notebook_name}: ctr_run_time={params['ctr_run_time']}, "
+            f"ro_sel={params['ro_sel']}, sample_size={params['sample_size']}"
+        )
+        push_notebook_params(ssh, notebook_path, params, password)
 
         # Get initial modification time of the output file (if it exists)
         check_file_command = f"stat -c %Y {output_file} || echo '0'"
@@ -124,6 +216,7 @@ def execute_notebook_and_copy(notebook_name, output_csv_name, ip, username, pass
         scp = ssh.open_sftp()
         os.makedirs(data_dir, exist_ok=True)
         scp.get(output_file, local_output_path)
+        boards.mark_readonly(local_output_path)
         log(f"Output file copied to {local_output_path}")
 
         return True
@@ -205,11 +298,24 @@ def main():
     data_dir = os.path.join(output_dir, "pynq_run_data")
     log_dir = os.path.join(output_dir, "logs")
 
+    config_path = os.path.join(os.path.dirname(__file__), "config.py")
+    try:
+        notebook_params = preflight.load_notebook_params(config_path, announce=False)
+    except SystemExit as exc:
+        print(exc)
+        sys.exit(1)
+
     if args.dry_run:
         print(f"Board: {board['id']}")
         print(f"IP: {ip}")
         print(f"Output directory: {output_dir}")
         print("Notebooks: " + ", ".join(name for name, _csv in boards.NOTEBOOKS))
+        for name, _csv in boards.NOTEBOOKS:
+            values = notebook_params[name]
+            print(
+                f"{name}: ctr_run_time={values['ctr_run_time']}, "
+                f"ro_sel={values['ro_sel']}, sample_size={values['sample_size']}"
+            )
         print("Dry run only. No SSH connection was opened.")
         return
 
@@ -236,6 +342,7 @@ def main():
                 args.temp,
                 args.time_str,
                 board["id"],
+                notebook_params[notebook],
             )
             if not success:
                 failed_name = os.path.splitext(notebook)[0]
