@@ -83,9 +83,13 @@ A measurement CSV is named like `output_data_11_80C_2026_10_08_1_2_3_time_0.csv`
 
 ## When the run is finished
 
-Double-click `average_outputs.bat`. Read the warning in the window. Type `YES` and press Enter. Any other answer stops and leaves the files alone.
+Double-click `average_outputs.bat` for board A. Double-click `average_groupB.bat` for group B. Read the warning in the window. Type `YES` and press Enter. Any other answer stops and leaves the files alone.
 
-The bat averages CSVs in `data/boards/<board>/pynq_run_data` and writes `data/boards/<board>/averages/`. Those raw CSVs stay in place. It folds that board's logs into one daily log and removes the original log files. It does not read `data/boards/board_02/groupB/`, so group B's CSVs stay where they are.
+`average_outputs.bat` averages CSVs in `data/boards/<board>/pynq_run_data` and writes `data/boards/<board>/averages/`. It does not read `data/boards/board_02/groupB/`.
+
+`average_groupB.bat` averages CSVs in `data/boards/board_02/groupB/pynq_run_data` and writes `data/boards/board_02/groupB/averages/`. It does not read the board A folders.
+
+Both leave the raw CSVs in place. Each folds that folder's logs into one daily log and removes the original log files.
 
 ## Mail notices
 
@@ -104,11 +108,12 @@ Notices go to the TA and to group A when the oven run starts, when a measurement
 
 ## For the TA
 
-`watch_temperature.bat` and `average_outputs.bat` are the two extra launchers from the sections above. The other rows are calibration, checks, and offline processing.
+`watch_temperature.bat`, `average_outputs.bat`, and `average_groupB.bat` are the extra launchers from the sections above. The other rows are calibration, checks, and offline processing.
 
 | Script | Use |
 | --- | --- |
 | `average_outputs.bat` | Runs `lab_tools/average_outputs.py` after you type `YES`. Averages each board's top-level `pynq_run_data` CSVs into `data/boards/<board>/averages/` and leaves those raw CSVs in place. It folds that board's logs into one daily log and removes the original log files. It does not look inside `data/boards/board_02/<group>/` |
+| `average_groupB.bat` | Runs `lab_tools/average_outputs.py --group groupB` after you type `YES`. Averages `data/boards/board_02/groupB/pynq_run_data` into `data/boards/board_02/groupB/averages/` and leaves those raw CSVs in place. It does not read the board A folders |
 | `watch_temperature.bat` | Runs `lab_tools/animate_example_prev.py`. Live plot of `data/temperature_data/live_temperature_data.csv` while the oven run is going. Close the plot window to stop |
 | `lab_tools/plot_temp_vs_time.py` | Plot the saved oven log after a run |
 | `lab_tools/pynq_call_script.py` | Start the three notebooks on one board only. This does not run the oven |
@@ -119,7 +124,7 @@ Notices go to the TA and to group A when the oven run starts, when a measurement
 
 Register dumps are written to `data/oven_reads/`.
 
-Every bat changes to the folder that contains the bat, then prefers `.venv\Scripts\python.exe`, then `py -3`, then `python`. It prints `OK` or `FAIL`. A failure leaves the window open. `watch_temperature.bat` and `average_outputs.bat` also leave the window open after `OK`, so the last lines stay visible. `average_outputs.bat` runs the script only after you type `YES`.
+Every bat changes to the folder that contains the bat, then prefers `.venv\Scripts\python.exe`, then `py -3`, then `python`. It prints `OK` or `FAIL`. A failure leaves the window open. `watch_temperature.bat`, `average_outputs.bat`, and `average_groupB.bat` also leave the window open after `OK`, so the last lines stay visible. The two average bats run the script only after you type `YES`.
 
 | Bat | Command |
 | --- | --- |
@@ -129,6 +134,7 @@ Every bat changes to the folder that contains the bat, then prefers `.venv\Scrip
 | `board_02_only.bat` | `python run/board_only.py --board board_02 --group groupB` |
 | `watch_temperature.bat` | `python lab_tools/animate_example_prev.py` |
 | `average_outputs.bat` | `python lab_tools/average_outputs.py` |
+| `average_groupB.bat` | `python lab_tools/average_outputs.py --group groupB` |
 
 `python run/oven_run.py --dry-run --boards board_01` only loads `run/config.py` and prints `board_01`. It does not open the oven port and does not contact the boards.
 

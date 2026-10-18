@@ -1,3 +1,4 @@
+import argparse
 import matplotlib.pyplot as plt
 import os
 import sys
@@ -220,36 +221,66 @@ def create_daily_summary_log(log_dir):
     return summary_path
 
 
-def main():
-    boards_root = boards.BOARDS_ROOT
+def average_one(label, data_dir, log_dir, avg_dir):
+    """Average one result folder. Raw CSVs stay in data_dir."""
+    if not data_dir.is_dir():
+        print(f"Skipping {label}: no pynq_run_data")
+        return False
+    print(f"Averaging {label}")
+    groups = group_files_by_temp(str(data_dir))
+    if not groups:
+        print(f"No measurement CSVs in {data_dir}")
+    for temp, files in groups.items():
+        write_avg_csv_for_temp(temp, files, str(data_dir), str(avg_dir))
+    try:
+        if log_dir.is_dir():
+            create_daily_summary_log(str(log_dir))
+    except Exception:
+        pass
+    return True
+
+
+def average_boards(boards_root, group=None):
+    """Average top-level board folders, or one group's folders.
+
+    The oven run writes data/boards/<board>/pynq_run_data. Group B writes
+    data/boards/board_02/<group>/pynq_run_data. Those two trees stay separate.
+    """
+    if group is not None and not re.fullmatch(r"[A-Za-z0-9_-]+", group):
+        print("Group name must contain only letters, numbers, underscores, and hyphens.")
+        return 1
     if not boards_root.is_dir():
         print(f"No board results at {boards_root}")
-        return
+        return 0
 
     found = False
     for board_dir in sorted(path for path in boards_root.iterdir() if path.is_dir()):
-        data_dir = board_dir / "pynq_run_data"
-        log_dir = board_dir / "logs"
-        if not data_dir.is_dir():
-            print(f"Skipping {board_dir.name}: no pynq_run_data")
-            continue
-        found = True
-        print(f"Averaging {board_dir.name}")
-        groups = group_files_by_temp(str(data_dir))
-        if not groups:
-            print(f"No measurement CSVs in {data_dir}")
-        avg_dir = str(board_dir / "averages")
-        for temp, files in groups.items():
-            write_avg_csv_for_temp(temp, files, str(data_dir), avg_dir)
-        try:
-            if log_dir.is_dir():
-                create_daily_summary_log(str(log_dir))
-        except Exception:
-            pass
+        if group:
+            base = board_dir / group
+            label = f"{board_dir.name}/{group}"
+        else:
+            base = board_dir
+            label = board_dir.name
+        if average_one(label, base / "pynq_run_data", base / "logs", base / "averages"):
+            found = True
 
     if not found:
-        print(f"No pynq_run_data directories under {boards_root}")
+        if group:
+            print(f"No pynq_run_data directories for group {group} under {boards_root}")
+        else:
+            print(f"No pynq_run_data directories under {boards_root}")
+    return 0
+
+
+def main(argv=None):
+    parser = argparse.ArgumentParser(description="Average measurement CSVs. Raw CSVs are left in place.")
+    parser.add_argument(
+        "--group",
+        help="Average data/boards/<board>/<group>/ instead of the top-level board folder. Example: groupB",
+    )
+    args = parser.parse_args(argv)
+    return average_boards(boards.BOARDS_ROOT, args.group)
 
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())
