@@ -16,6 +16,7 @@ pd = None
 plt = None
 _VT_ENABLED = False
 _last_plain_status_time = 0.0
+_comm_log = None
 
 
 def load_run_packages():
@@ -48,6 +49,16 @@ PARITY = 'N'
 STOPBITS = 1
 TIMEOUT = 1
 SLAVE_ID = 1
+
+# One sample reads NPV, NSP, and PTNO. A miss is retried so a transient
+# communication error cannot look like the oven program has finished.
+MODBUS_READ_ATTEMPTS = 5
+MODBUS_RETRY_SLEEP_S = 0.5
+# A single PTNO of 0 stops the run only this close to the programmed end.
+# Earlier than that, a second successful read of 0 is required.
+PTNO_ZERO_NEAR_END_S = 120
+READ_FAILED_STATUS = "read failed after retries"
+COMM_LOG_NAME = "modbus_errors.log"
 
 # One shared oven log. Each PYNQ-Z2 writes under data/boards/<board id>/.
 LOCAL_OUTPUT_DIR = boards.OUTPUT_ROOT
@@ -203,37 +214,147 @@ def p1_key_activate(instrument):
         print(f"Error activating P1 key: {e}")
         raise
 
-# Sample the controller by reading the NPV, NSP, and PTNO registers. - 0.15 seconds wait
-def sample_controller(instrument, start_time=0, expected_run_time=0, filename=None, live_filename=None):
+def print_above_status(line):
+    """Print one line above the live status block so a redraw cannot erase it.
+
+    The status block clears its own lines with \\033[2K. Inserting above that
+    block keeps the text in the scrollback. The text must not start with
+    \\r\\033[2K.
+    """
+    if not _VT_ENABLED:
+        print(line)
+    else:
+        sys.stdout.write("\033[L" + line + "\033[1E")
+        sys.stdout.flush()
+
+
+def clear_modbus_input(instrument):
+    """Drop leftover serial bytes so the next Modbus frame is not read as a reply."""
     try:
-        line = ""  # Initialize line variable
-        npv = instrument.read_register(0)/10  # Read NPV register
-        time.sleep(0.05)  # Sleep to ensure the read is processed
-        nsp = instrument.read_register(1)/10  # Read NSP register
-        time.sleep(0.05)  # Sleep to ensure the read is processed
-        ptno = instrument.read_register(24)  # Read PTNO register
-        time.sleep(0.05)  # Sleep to ensure the read is processed
+        instrument.serial.reset_input_buffer()
+    except Exception:
+        return
 
-        fin_hours = expected_run_time // 3600  # Calculate expected hours
-        fin_minutes = (expected_run_time % 3600) // 60  # Calculate expected minutes
-        fin_seconds = expected_run_time % 60  # Calculate expected seconds
 
-        elapsed_time = time.time() - start_time  # Calculate elapsed time
-        hours, rem = divmod(elapsed_time, 3600)  # Convert to hours
-        minutes, seconds = divmod(rem, 60)  # Convert remaining seconds to minutes
-        line = f"TIME: {int(hours):02d}:{int(minutes):02d}:{seconds:04.2f}/{int(fin_hours):02d}:{int(fin_minutes):02d}:{fin_seconds:04.2f} - NPV: {npv}, NSP: {nsp}"
+def open_comm_log():
+    """Open the communication log once. Later errors append to the same file."""
+    global _comm_log
+    if _comm_log is not None and not _comm_log.closed:
+        return
+    try:
+        LOCAL_TEMP_DIR.mkdir(parents=True, exist_ok=True)
+        _comm_log = open(LOCAL_TEMP_DIR / COMM_LOG_NAME, "a", encoding="utf-8")
+    except Exception:
+        _comm_log = None
 
-        append_to_csv(filename, "time", "Temperature", elapsed_time/60, npv, False)  # Append time and NPV to CSV file
-        append_to_csv(live_filename, "time", "Temperature", elapsed_time/60, npv, True)  # Append time and NPV to live CSV file
-        stable = True if abs(npv - nsp) < stability_standard_deviation else False   # Check if the process is stable
 
-        return [ptno, stable, npv, line]  # Return the process number and stability status
-    except minimalmodbus.NoResponseError as nre:
-        print(f"\r\033[2KNo response from the instrument: {nre}")
-        return [0, False, 0, line]
-    except Exception as e:
-        print(f"\r\033[2KError reading registers: {e}")
-        return [0, False, 0, line]  # Return 0 for PTNO and False for stability in case of error
+def close_comm_log():
+    global _comm_log
+    if _comm_log is None:
+        return
+    try:
+        _comm_log.close()
+    except Exception:
+        pass
+    _comm_log = None
+
+
+def log_comm_error(message):
+    """Append one communication error with a timestamp. Never raises."""
+    global _comm_log
+    try:
+        open_comm_log()
+        if _comm_log is None:
+            return
+        stamp = time.strftime("%Y-%m-%d %H:%M:%S")
+        _comm_log.write(f"{stamp} {message}\n")
+        _comm_log.flush()
+    except Exception:
+        try:
+            if _comm_log is not None:
+                _comm_log.close()
+        except Exception:
+            pass
+        _comm_log = None
+
+
+def note_comm_error(message):
+    """Keep a communication error on screen and in the log."""
+    text = " ".join(str(message).splitlines()) or "communication error"
+    print_above_status(text)
+    log_comm_error(text)
+
+
+def ptno_means_complete(ptno, pending_zero, elapsed_s, expected_run_time_s):
+    """Return (complete, pending_zero) for one successful controller sample.
+
+    A PTNO of 0 is the controller's idle value. It ends the run when a previous
+    successful sample also read 0, or when the clock is already within
+    PTNO_ZERO_NEAR_END_S of the programmed end. Any other PTNO clears the
+    pending confirmation. Do not call this for a failed read.
+    """
+    if ptno != 0:
+        return False, False
+    near_expected_end = (
+        expected_run_time_s > 0
+        and elapsed_s >= expected_run_time_s - PTNO_ZERO_NEAR_END_S
+    )
+    if pending_zero or near_expected_end:
+        return True, True
+    return False, True
+
+
+# Sample NPV, NSP, and PTNO. About 0.15 seconds when the read succeeds.
+# Each failed attempt waits MODBUS_RETRY_SLEEP_S and does not return PTNO 0.
+def sample_controller(instrument, start_time=0, expected_run_time=0, filename=None, live_filename=None):
+    read_ok = False
+    npv = 0
+    nsp = 0
+    ptno = 0
+    for attempt in range(1, MODBUS_READ_ATTEMPTS + 1):
+        try:
+            npv = instrument.read_register(0)/10  # Read NPV register
+            time.sleep(0.05)  # Sleep to ensure the read is processed
+            nsp = instrument.read_register(1)/10  # Read NSP register
+            time.sleep(0.05)  # Sleep to ensure the read is processed
+            ptno = instrument.read_register(24)  # Read PTNO register
+            time.sleep(0.05)  # Sleep to ensure the read is processed
+            read_ok = True
+            break
+        except Exception as exc:
+            # A failed read must not report PTNO 0. The main loop treats 0 as
+            # a finished program and would end a multi-day run.
+            if minimalmodbus is not None and isinstance(exc, minimalmodbus.NoResponseError):
+                message = (
+                    f"No response from the instrument "
+                    f"(attempt {attempt}/{MODBUS_READ_ATTEMPTS}): {exc}"
+                )
+            else:
+                message = (
+                    f"Error reading registers "
+                    f"(attempt {attempt}/{MODBUS_READ_ATTEMPTS}): {exc}"
+                )
+            note_comm_error(message)
+            time.sleep(MODBUS_RETRY_SLEEP_S)
+            clear_modbus_input(instrument)
+
+    if not read_ok:
+        return [1, False, 0, READ_FAILED_STATUS]
+
+    fin_hours = expected_run_time // 3600  # Calculate expected hours
+    fin_minutes = (expected_run_time % 3600) // 60  # Calculate expected minutes
+    fin_seconds = expected_run_time % 60  # Calculate expected seconds
+
+    elapsed_time = time.time() - start_time  # Calculate elapsed time
+    hours, rem = divmod(elapsed_time, 3600)  # Convert to hours
+    minutes, seconds = divmod(rem, 60)  # Convert remaining seconds to minutes
+    line = f"TIME: {int(hours):02d}:{int(minutes):02d}:{seconds:04.2f}/{int(fin_hours):02d}:{int(fin_minutes):02d}:{fin_seconds:04.2f} - NPV: {npv}, NSP: {nsp}"
+
+    append_to_csv(filename, "time", "Temperature", elapsed_time/60, npv, False)  # Append time and NPV to CSV file
+    append_to_csv(live_filename, "time", "Temperature", elapsed_time/60, npv, True)  # Append time and NPV to live CSV file
+    stable = True if abs(npv - nsp) < stability_standard_deviation else False   # Check if the process is stable
+
+    return [ptno, stable, npv, line]  # Return the process number and stability status
 
 #--------------------------------#
 ### Output handling Functions ####
@@ -444,11 +565,7 @@ def print_round_summary(line):
     The status block redraws the few lines under the cursor. Inserting the
     summary above that block keeps it on screen.
     """
-    if not _VT_ENABLED:
-        print(line)
-    else:
-        sys.stdout.write("\033[L" + line + "\033[1E")
-        sys.stdout.flush()
+    print_above_status(line)
     _note_oven_round(line)
 
 
@@ -633,21 +750,38 @@ def run_oven_loop(selected, state):
         last_pynq_sample_time = None
         pynq_waiting = False
         open_rounds = []
+        ptno_zero_pending = False
         # Main monitoring loop
         while True:
             open_rounds = report_finished_rounds(open_rounds)
             # Sample the controller (prints to first display line)
             [ptno, stable, npv ,status_line0] = sample_controller(instrument, start_time, expected_run_time, temperature_file, live_temperature_file)
-            current_temperature = round(npv/10)*10  # npv is the current temperature in degrees Celsius rounded to 10s
 
             # Print status lines
             monitor_print(status_line0, status_line1, status_line2, status_line3)
 
-            # Check if the process is complete
-            if ptno == 0:
+            # A failed read returns a non-zero PTNO. Leave the stability timer
+            # and the PYNQ schedule unchanged until a real sample arrives.
+            if status_line0 == READ_FAILED_STATUS:
+                continue
+
+            current_temperature = round(npv/10)*10  # npv is the current temperature in degrees Celsius rounded to 10s
+
+            # PTNO 0 ends the run only after a second successful 0, or when
+            # the clock is already close to the programmed end.
+            complete, ptno_zero_pending = ptno_means_complete(
+                ptno,
+                ptno_zero_pending,
+                time.time() - start_time,
+                expected_run_time,
+            )
+            if complete:
                 open_rounds = report_finished_rounds(open_rounds)
                 print("\nProcess complete.")
                 break  # Exit loop if PTNO is 0 (indicating process completion)
+            if ptno_zero_pending:
+                print_above_status("PTNO reported 0; waiting for a second read before stopping.")
+                continue
 
             # Check stability
             if stable:
@@ -730,6 +864,7 @@ def run_oven_loop(selected, state):
         _run_notice["crashed"] = True
         return
     finally:
+        close_comm_log()
         print("\n\nMeasurement sequence complete or terminated.")
 
 
