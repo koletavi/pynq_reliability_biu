@@ -16,7 +16,12 @@ pd = None
 plt = None
 _VT_ENABLED = False
 _last_plain_status_time = 0.0
+_status_anchor_ready = False
 _comm_log = None
+_pending_comm_errors = []
+# monitor_print moves down this many lines, then returns to the anchor.
+# Communication errors are inserted on the next line so a redraw leaves them.
+STATUS_REDRAW_LINES = 5
 
 
 def load_run_packages():
@@ -279,10 +284,44 @@ def log_comm_error(message):
 
 
 def note_comm_error(message):
-    """Keep a communication error on screen and in the log."""
+    """Remember one communication error for the screen, and append it to the log.
+
+    The line is not printed here. The monitoring loop prints it under the
+    status block after that block has been drawn, so the TIME line stays put.
+    """
     text = " ".join(str(message).splitlines()) or "communication error"
-    print_above_status(text)
+    _pending_comm_errors.append(text)
     log_comm_error(text)
+
+
+def print_errors_under_status():
+    """Print queued communication errors under the live monitoring lines.
+
+    In virtual-terminal mode the cursor is returned to the status anchor, so
+    the next monitor_print refreshes the same TIME, stability, board, and
+    control lines. The error text does not start with a line-clear sequence.
+    """
+    if not _pending_comm_errors:
+        return
+    errors = _pending_comm_errors[:]
+    _pending_comm_errors.clear()
+
+    if not _VT_ENABLED or not _status_anchor_ready:
+        for text in errors:
+            print(text)
+        return
+
+    # One line below the blank line monitor_print keeps under the status block.
+    down = STATUS_REDRAW_LINES + 1
+    parts = [f"\033[{down}E"]
+    # Insert in reverse so attempt 1 ends up directly under the status block
+    # and later attempts follow it downward.
+    for text in reversed(errors):
+        parts.append("\033[L\033[2K")
+        parts.append(text)
+    parts.append(f"\033[{down}F")
+    sys.stdout.write("".join(parts))
+    sys.stdout.flush()
 
 
 def ptno_means_complete(ptno, pending_zero, elapsed_s, expected_run_time_s):
@@ -422,12 +461,12 @@ def enable_virtual_terminal():
         return False
 
 
-def monitor_print(line0="", line1="", line2="", line3=""):
-    global _last_plain_status_time
+def monitor_print(line0="", line1="", line2="", line3="", force=False):
+    global _last_plain_status_time, _status_anchor_ready
 
     if not _VT_ENABLED:
         now = time.monotonic()
-        if now - _last_plain_status_time < 30:
+        if not force and now - _last_plain_status_time < 30:
             return
         _last_plain_status_time = now
         for line in (line0, line1, line2, line3):
@@ -455,6 +494,7 @@ def monitor_print(line0="", line1="", line2="", line3=""):
 
     # Move back to the top line for next update
     print("\033[5F", end="", flush=True)  # Move back up to the top line
+    _status_anchor_ready = True
 
 #-------------------------------------#
 ##### PYNQ-Z2 Execution Functions #####
@@ -694,8 +734,10 @@ def show_plot(temperature_file):
 
 def run_oven_loop(selected, state):
     """Program the oven and measure the named boards until the program ends."""
-    global _VT_ENABLED
+    global _VT_ENABLED, _status_anchor_ready
     _VT_ENABLED = enable_virtual_terminal()
+    _status_anchor_ready = False
+    _pending_comm_errors.clear()
     if not _VT_ENABLED:
         print("Console cursor updates are unavailable; plain status snapshots will print every 30 seconds.")
     prepare_output_dirs(selected)
@@ -751,18 +793,33 @@ def run_oven_loop(selected, state):
         pynq_waiting = False
         open_rounds = []
         ptno_zero_pending = False
+        reprint_status = False
         # Main monitoring loop
         while True:
             open_rounds = report_finished_rounds(open_rounds)
             # Sample the controller (prints to first display line)
-            [ptno, stable, npv ,status_line0] = sample_controller(instrument, start_time, expected_run_time, temperature_file, live_temperature_file)
+            [ptno, stable, npv, sample_line] = sample_controller(instrument, start_time, expected_run_time, temperature_file, live_temperature_file)
 
-            # Print status lines
-            monitor_print(status_line0, status_line1, status_line2, status_line3)
+            # A failed read keeps the last monitoring lines on screen. The
+            # error text is printed under that block, and the next good sample
+            # updates the block again.
+            read_failed = sample_line == READ_FAILED_STATUS
+            force_status = bool(_pending_comm_errors)
+            if read_failed:
+                reprint_status = True
+                force_status = True
+            else:
+                status_line0 = sample_line
+                if reprint_status:
+                    force_status = True
+                    reprint_status = False
 
-            # A failed read returns a non-zero PTNO. Leave the stability timer
-            # and the PYNQ schedule unchanged until a real sample arrives.
-            if status_line0 == READ_FAILED_STATUS:
+            monitor_print(status_line0, status_line1, status_line2, status_line3, force=force_status)
+            print_errors_under_status()
+
+            # Leave the stability timer and the PYNQ schedule unchanged until
+            # a real sample arrives.
+            if read_failed:
                 continue
 
             current_temperature = round(npv/10)*10  # npv is the current temperature in degrees Celsius rounded to 10s
